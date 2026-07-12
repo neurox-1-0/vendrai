@@ -4,7 +4,7 @@ import React from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import { LayoutDashboard, FileText, Users, Activity, Settings, HelpCircle, LogOut } from 'lucide-react';
+import { LayoutDashboard, FileText, Users, Activity, Settings, HelpCircle, ClipboardList } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 export function Sidebar() {
@@ -15,6 +15,7 @@ export function Sidebar() {
     { name: 'Case Intake', href: '/cases/new', icon: FileText },
     { name: 'Approvals', href: '/approvals', icon: Users },
     { name: 'Analytics', href: '/analytics', icon: Activity },
+    { name: 'Reports', href: '/reports', icon: ClipboardList },
   ];
 
   return (
