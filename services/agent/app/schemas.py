@@ -16,3 +16,9 @@ class DuplicateDecision(BaseModel):
     confidence_score: float = Field(description="Confidence score from 0.0 to 1.0 that this is a duplicate")
     existing_vendor_id: Optional[str] = Field(None, description="The ERP ID of the matched vendor if a duplicate is found")
     reasoning: str = Field(description="Explanation of why this is or is not considered a duplicate based on name and tax ID matching")
+
+class RiskAssessment(BaseModel):
+    risk_level: str = Field(description="The assigned risk level: LOW, MEDIUM, or HIGH")
+    risk_factors: list[str] = Field(description="List of specific risk factors identified, e.g. 'Sanctions match', 'High-risk country'")
+    requires_manual_review: bool = Field(description="True if the risk level is MEDIUM or HIGH, requiring human approval")
+    reasoning: str = Field(description="Detailed explanation of how the risk level was determined")

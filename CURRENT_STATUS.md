@@ -28,7 +28,7 @@ This log tracks the implementation progress of the project based on the Enterpri
 - [x] Setup LangGraph Supervisor Node
 - [x] Implement Document Extraction Agent
 - [x] Implement Duplicate Detection Agent (using mock ERP pg_trgm tool)
-- [ ] Implement Risk Agent
+- [x] Implement Risk Agent (using mock OFAC/Sanctions compliance tool)
 - [ ] Implement Policy Retrieval Agent (Qdrant)
 - [ ] Implement Reasoning & Routing logic
 - [ ] Connect Gemini 2.5 Flash API via Tool Gateway

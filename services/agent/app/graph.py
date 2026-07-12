@@ -6,9 +6,10 @@ from pydantic import BaseModel, Field
 
 from app.config import settings
 from app.state import AgentState
-from app.schemas import SupplierDocumentFields, DuplicateDecision
+from app.schemas import SupplierDocumentFields, DuplicateDecision, RiskAssessment
 from app.tools.ocr import extract_text_from_document
 from app.tools.duplicate import search_vendor_duplicates
+from app.tools.risk import check_vendor_risk
 
 # Setup Gemini Model
 if not settings.GEMINI_API_KEY:
@@ -196,12 +197,68 @@ def duplicate_detection_node(state: AgentState) -> dict:
         return {"duplicate_status": "ERROR"}
 
 
-def risk_agent_stub(state: AgentState) -> dict:
-    print("--- RISK AGENT ---")
-    return {
-        "messages": [SystemMessage(content="Risk check completed. Level: LOW.")],
-        "risk_level": "LOW"
-    }
+def risk_assessment_node(state: AgentState) -> dict:
+    print(f"--- RISK ASSESSMENT AGENT --- Case: {state.get('case_id')}")
+    
+    vendor = state.get("current_vendor")
+    if not vendor:
+        return {"risk_level": "UNKNOWN", "messages": [SystemMessage(content="No vendor data to perform risk check on.")]}
+        
+    vendor_name = vendor.get("vendor_name", "")
+    address = vendor.get("address", "")
+    
+    # Step 1: Call mock compliance tool
+    print(f"Checking OFAC and Sanctions for: {vendor_name}")
+    raw_risk_data = check_vendor_risk(vendor_name, address)
+    
+    if not settings.GEMINI_API_KEY:
+        print("WARNING: No GEMINI API Key, returning stub risk check.")
+        return {"risk_level": "LOW"}
+        
+    # Step 2: Use LLM to analyze the risk factors and determine final level
+    llm = ChatGoogleGenerativeAI(
+        model=settings.DEFAULT_MODEL,
+        google_api_key=settings.GEMINI_API_KEY,
+        temperature=0.1
+    )
+    risk_llm = llm.with_structured_output(RiskAssessment)
+    
+    prompt = (
+        "You are a Senior Compliance Officer for a Global Enterprise.\n"
+        "Review the following vendor details and the raw compliance/sanctions check results.\n"
+        "Determine the final risk level (LOW, MEDIUM, HIGH).\n\n"
+        f"VENDOR DETAILS:\nName: {vendor_name}\nAddress: {address}\n\n"
+        f"COMPLIANCE CHECK RESULTS:\n{raw_risk_data}\n\n"
+        "Rules:\n"
+        "- If there are any direct sanctions hits or high-risk countries, risk MUST be HIGH.\n"
+        "- If there are minor flags (e.g. shell company), risk is MEDIUM.\n"
+        "- If no risk factors are identified, risk is LOW."
+    )
+    
+    try:
+        assessment = risk_llm.invoke(prompt)
+        
+        if isinstance(assessment, list):
+            assessment = assessment[0]
+            
+        if isinstance(assessment, BaseModel):
+            assessment_dict = assessment.model_dump()
+        elif isinstance(assessment, dict):
+            assessment_dict = assessment
+        else:
+            assessment_dict = getattr(assessment, "dict", lambda: {})()
+            
+        risk_level = assessment_dict.get("risk_level", "UNKNOWN")
+        print(f"Risk Assessment Complete: {risk_level}")
+        
+        return {
+            "risk_level": risk_level,
+            "messages": [SystemMessage(content=f"Risk Assessment Complete. Level: {risk_level}. Reasoning: {assessment_dict.get('reasoning')}")]
+        }
+        
+    except Exception as e:
+        print(f"Error in Risk Assessment: {e}")
+        return {"risk_level": "ERROR"}
 
 # Build Graph
 builder = StateGraph(AgentState)
@@ -209,7 +266,7 @@ builder = StateGraph(AgentState)
 builder.add_node("supervisor", supervisor_node)
 builder.add_node("document_extraction_agent", document_extraction_node)
 builder.add_node("duplicate_detection_agent", duplicate_detection_node)
-builder.add_node("risk_agent", risk_agent_stub)
+builder.add_node("risk_agent", risk_assessment_node)
 
 # The supervisor determines the next step
 builder.set_entry_point("supervisor")
