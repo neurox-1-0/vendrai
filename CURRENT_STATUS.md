@@ -25,7 +25,7 @@ This log tracks the implementation progress of the project based on the Enterpri
 - [ ] Implement Approval Queue endpoints
 
 ### 4. Agent Runtime (LangGraph)
-- [ ] Setup LangGraph Supervisor Node
+- [x] Setup LangGraph Supervisor Node
 - [ ] Implement Document Extraction Agent
 - [ ] Implement Duplicate Detection Agent
 - [ ] Implement Risk Agent
