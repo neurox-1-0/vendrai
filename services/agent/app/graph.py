@@ -6,8 +6,9 @@ from pydantic import BaseModel, Field
 
 from app.config import settings
 from app.state import AgentState
-from app.schemas import SupplierDocumentFields
+from app.schemas import SupplierDocumentFields, DuplicateDecision
 from app.tools.ocr import extract_text_from_document
+from app.tools.duplicate import search_vendor_duplicates
 
 # Setup Gemini Model
 if not settings.GEMINI_API_KEY:
@@ -16,7 +17,7 @@ if not settings.GEMINI_API_KEY:
     pass
 
 class Route(BaseModel):
-    next_node: str = Field(description="The next agent to route to: 'document_extraction_agent', 'risk_agent', or 'END'")
+    next_node: str = Field(description="The next agent to route to: 'document_extraction_agent', 'duplicate_detection_agent', 'risk_agent', or 'END'")
     reasoning: str = Field(description="Why this route was chosen based on the current case state")
 
 def supervisor_node(state: AgentState) -> dict:
@@ -42,11 +43,13 @@ def supervisor_node(state: AgentState) -> dict:
         "Your job is to route to the correct specialist agent based on the CURRENT STATE.\n\n"
         f"CURRENT STATE:\n"
         f"- Vendor Extracted: {'YES' if state.get('current_vendor') else 'NO'}\n"
+        f"- Duplicate Checked: {'YES' if state.get('duplicate_status') else 'NO'}\n"
         f"- Risk Checked: {'YES' if state.get('risk_level') else 'NO'}\n\n"
         "ROUTING RULES:\n"
         "1. If Vendor Extracted is NO, route to 'document_extraction_agent'.\n"
-        "2. If Vendor Extracted is YES but Risk Checked is NO, route to 'risk_agent'.\n"
-        "3. If both are YES, route to 'END'."
+        "2. If Vendor Extracted is YES but Duplicate Checked is NO, route to 'duplicate_detection_agent'.\n"
+        "3. If Duplicate Checked is YES but Risk Checked is NO, route to 'risk_agent'.\n"
+        "4. If all are YES, route to 'END'."
     )
     
     messages = [SystemMessage(content=system_prompt)] + list(state.get("messages", []))
@@ -124,6 +127,75 @@ def document_extraction_node(state: AgentState) -> dict:
             "messages": [SystemMessage(content=f"Document Extraction failed: {str(e)}")]
         }
 
+def duplicate_detection_node(state: AgentState) -> dict:
+    print(f"--- DUPLICATE DETECTION AGENT --- Case: {state.get('case_id')}")
+    
+    vendor = state.get("current_vendor")
+    if not vendor:
+        return {"duplicate_status": "SKIPPED", "messages": [SystemMessage(content="No vendor data to check duplicates for.")]}
+        
+    vendor_name = vendor.get("vendor_name", "")
+    tax_id = vendor.get("tax_id")
+    
+    # Step 1: Query potential duplicates
+    print(f"Searching ERP for duplicates for: {vendor_name}")
+    potential_matches = search_vendor_duplicates(vendor_name, tax_id)
+    
+    if not potential_matches:
+        print("No potential duplicates found.")
+        return {
+            "duplicate_status": "NO_DUPLICATES",
+            "messages": [SystemMessage(content="Duplicate check complete. No matching ERP vendors found.")]
+        }
+        
+    if not settings.GEMINI_API_KEY:
+        print("WARNING: No GEMINI API Key, returning stub duplicate check.")
+        return {"duplicate_status": "POTENTIAL_DUPLICATE_FOUND"}
+
+    # Step 2: Use LLM to reason about the matches
+    llm = ChatGoogleGenerativeAI(
+        model=settings.DEFAULT_MODEL,
+        google_api_key=settings.GEMINI_API_KEY,
+        temperature=0.1
+    )
+    duplicate_llm = llm.with_structured_output(DuplicateDecision)
+    
+    prompt = (
+        "You are a master data governance agent. We extracted a vendor from a document and searched our ERP system for similar vendors.\n"
+        "Your job is to look at the newly extracted vendor and the potential ERP matches, and determine if this is likely a DUPLICATE.\n\n"
+        f"EXTRACTED VENDOR:\nName: {vendor_name}\nTax ID: {tax_id}\n\n"
+        f"POTENTIAL ERP MATCHES:\n{potential_matches}\n\n"
+        "If a match is extremely likely (e.g. same tax id, or very similar name), mark it as a duplicate."
+    )
+    
+    try:
+        decision = duplicate_llm.invoke(prompt)
+        
+        if isinstance(decision, list):
+            decision = decision[0]
+            
+        if isinstance(decision, BaseModel):
+            decision_dict = decision.model_dump()
+        elif isinstance(decision, dict):
+            decision_dict = decision
+        else:
+            decision_dict = getattr(decision, "dict", lambda: {})()
+            
+        print(f"Duplicate Decision: {decision_dict}")
+        
+        is_dup = decision_dict.get("is_duplicate", False)
+        status = "DUPLICATE_FOUND" if is_dup else "NO_DUPLICATES"
+        
+        return {
+            "duplicate_status": status,
+            "messages": [SystemMessage(content=f"Duplicate Check Complete. Decision: {status}. Reasoning: {decision_dict.get('reasoning')}")]
+        }
+        
+    except Exception as e:
+        print(f"Error in Duplicate Detection: {e}")
+        return {"duplicate_status": "ERROR"}
+
+
 def risk_agent_stub(state: AgentState) -> dict:
     print("--- RISK AGENT ---")
     return {
@@ -136,6 +208,7 @@ builder = StateGraph(AgentState)
 
 builder.add_node("supervisor", supervisor_node)
 builder.add_node("document_extraction_agent", document_extraction_node)
+builder.add_node("duplicate_detection_agent", duplicate_detection_node)
 builder.add_node("risk_agent", risk_agent_stub)
 
 # The supervisor determines the next step
@@ -147,6 +220,7 @@ builder.add_conditional_edges(
     lambda state: state["next_node"],
     {
         "document_extraction_agent": "document_extraction_agent",
+        "duplicate_detection_agent": "duplicate_detection_agent",
         "risk_agent": "risk_agent",
         "END": END
     }
@@ -154,6 +228,7 @@ builder.add_conditional_edges(
 
 # Agents always route back to supervisor to decide what's next
 builder.add_edge("document_extraction_agent", "supervisor")
+builder.add_edge("duplicate_detection_agent", "supervisor")
 builder.add_edge("risk_agent", "supervisor")
 
 graph = builder.compile()
@@ -166,6 +241,7 @@ if __name__ == "__main__":
         "case_type": "VENDOR_ONBOARDING",
         "messages": [HumanMessage(content="A new vendor just submitted a W-9 form and bank details. Please process.")],
         "current_vendor": None,
+        "duplicate_status": None,
         "risk_level": None
     }
     

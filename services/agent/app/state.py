@@ -13,6 +13,7 @@ class AgentState(TypedDict):
     
     # Shared global state context for the agents
     current_vendor: Optional[Dict[str, Any]]
+    duplicate_status: Optional[str]
     risk_level: Optional[str]
     missing_information: Optional[list[str]]
     approval_status: Optional[str]

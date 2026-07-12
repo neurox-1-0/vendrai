@@ -27,7 +27,7 @@ This log tracks the implementation progress of the project based on the Enterpri
 ### 4. Agent Runtime (LangGraph)
 - [x] Setup LangGraph Supervisor Node
 - [x] Implement Document Extraction Agent
-- [ ] Implement Duplicate Detection Agent
+- [x] Implement Duplicate Detection Agent (using mock ERP pg_trgm tool)
 - [ ] Implement Risk Agent
 - [ ] Implement Policy Retrieval Agent (Qdrant)
 - [ ] Implement Reasoning & Routing logic

@@ -10,3 +10,9 @@ class SupplierDocumentFields(BaseModel):
     swift_code: Optional[str] = Field(None, description="The SWIFT or BIC code of the bank")
     invoice_amount: Optional[float] = Field(None, description="The total amount of the invoice, if present")
     currency: Optional[str] = Field(None, description="The currency of the invoice, e.g. USD, EUR")
+
+class DuplicateDecision(BaseModel):
+    is_duplicate: bool = Field(description="True if the extracted vendor is highly likely a duplicate of the existing ERP vendor")
+    confidence_score: float = Field(description="Confidence score from 0.0 to 1.0 that this is a duplicate")
+    existing_vendor_id: Optional[str] = Field(None, description="The ERP ID of the matched vendor if a duplicate is found")
+    reasoning: str = Field(description="Explanation of why this is or is not considered a duplicate based on name and tax ID matching")
