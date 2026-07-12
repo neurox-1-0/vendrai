@@ -87,10 +87,18 @@ export default function Dashboard() {
         
         {/* Main Chart Card */}
         <Card className="lg:col-span-2 min-h-[400px] flex flex-col justify-between">
-          <div className="flex justify-between items-start mb-8">
+          <div className="flex justify-between items-start mb-6">
             <div>
-              <h3 className="font-bold text-xl mb-2">Exceptions Volume</h3>
-              <p className="text-[var(--color-muted)]">Real-time processing metrics</p>
+              <h3 className="font-bold text-xl mb-1">Exceptions Volume</h3>
+              <p className="text-[var(--color-muted)] text-sm mb-4">Real-time processing metrics</p>
+              
+              <div className="inline-flex items-center gap-2 bg-[rgba(108,99,255,0.1)] border border-[rgba(108,99,255,0.2)] rounded-lg px-3 py-1.5">
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[var(--color-accent)] opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-[var(--color-accent)]"></span>
+                </span>
+                <span className="text-xs font-medium text-[var(--color-accent)]">AI Insight: Volume is up 15% today due to mid-month invoicing.</span>
+              </div>
             </div>
             <Button variant="primary" onClick={handleGenerateReport}>Generate Report</Button>
           </div>
