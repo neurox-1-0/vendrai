@@ -11,15 +11,8 @@ export default function Dashboard() {
       {/* Sidebar */}
       <aside className="w-64 flex flex-col justify-between p-8 border-r border-[rgba(255,255,255,0.2)] shadow-[var(--shadow-extruded)] z-10 relative">
         <div>
-          <div className="flex flex-col gap-4 mb-16">
-            <div className="h-10 relative">
-              <img src="/Black logo.svg" alt="Vendrai Logo" className="h-full w-auto object-contain dark:hidden" />
-              <img src="/White logo.svg" alt="Vendrai Logo" className="h-full w-auto object-contain hidden dark:block" />
-            </div>
-            <div>
-              <h1 className="font-display font-extrabold text-xl tracking-tight text-[var(--color-primary)]">Vendrai</h1>
-              <p className="text-xs text-[var(--color-muted)]">Vendor-to-Pay System</p>
-            </div>
+          <div className="flex justify-center mb-16">
+            <img src="/Full logo.svg" alt="Vendrai Logo" className="h-24 w-24 object-cover rounded-3xl shadow-[var(--shadow-extruded)]" />
           </div>
           
           <nav className="space-y-4">
@@ -61,7 +54,7 @@ export default function Dashboard() {
             </Button>
             
             <div className="h-12 w-12 rounded-full shadow-[var(--shadow-extruded)] border-2 border-[var(--color-clay)] overflow-hidden">
-              <img src="https://i.pravatar.cc/150?img=11" alt="User" className="h-full w-full object-cover" />
+              <img src="/user-image.jpg" alt="User Avatar" className="h-full w-full object-cover" />
             </div>
           </div>
         </header>
