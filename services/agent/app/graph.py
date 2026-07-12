@@ -6,10 +6,11 @@ from pydantic import BaseModel, Field
 
 from app.config import settings
 from app.state import AgentState
-from app.schemas import SupplierDocumentFields, DuplicateDecision, RiskAssessment
+from app.schemas import SupplierDocumentFields, DuplicateDecision, RiskAssessment, PolicyEvaluation
 from app.tools.ocr import extract_text_from_document
 from app.tools.duplicate import search_vendor_duplicates
 from app.tools.risk import check_vendor_risk
+from app.tools.policy import search_procurement_policies
 
 # Setup Gemini Model
 if not settings.GEMINI_API_KEY:
@@ -18,7 +19,7 @@ if not settings.GEMINI_API_KEY:
     pass
 
 class Route(BaseModel):
-    next_node: str = Field(description="The next agent to route to: 'document_extraction_agent', 'duplicate_detection_agent', 'risk_agent', or 'END'")
+    next_node: str = Field(description="The next agent to route to: 'document_extraction_agent', 'duplicate_detection_agent', 'risk_agent', 'policy_agent', or 'END'")
     reasoning: str = Field(description="Why this route was chosen based on the current case state")
 
 def supervisor_node(state: AgentState) -> dict:
@@ -45,12 +46,14 @@ def supervisor_node(state: AgentState) -> dict:
         f"CURRENT STATE:\n"
         f"- Vendor Extracted: {'YES' if state.get('current_vendor') else 'NO'}\n"
         f"- Duplicate Checked: {'YES' if state.get('duplicate_status') else 'NO'}\n"
-        f"- Risk Checked: {'YES' if state.get('risk_level') else 'NO'}\n\n"
+        f"- Risk Checked: {'YES' if state.get('risk_level') else 'NO'}\n"
+        f"- Policy Checked: {'YES' if state.get('policy_status') else 'NO'}\n\n"
         "ROUTING RULES:\n"
         "1. If Vendor Extracted is NO, route to 'document_extraction_agent'.\n"
         "2. If Vendor Extracted is YES but Duplicate Checked is NO, route to 'duplicate_detection_agent'.\n"
         "3. If Duplicate Checked is YES but Risk Checked is NO, route to 'risk_agent'.\n"
-        "4. If all are YES, route to 'END'."
+        "4. If Risk Checked is YES but Policy Checked is NO, route to 'policy_agent'.\n"
+        "5. If all are YES, route to 'END'."
     )
     
     messages = [SystemMessage(content=system_prompt)] + list(state.get("messages", []))
@@ -260,6 +263,68 @@ def risk_assessment_node(state: AgentState) -> dict:
         print(f"Error in Risk Assessment: {e}")
         return {"risk_level": "ERROR"}
 
+def policy_retrieval_node(state: AgentState) -> dict:
+    print(f"--- POLICY RETRIEVAL AGENT --- Case: {state.get('case_id')}")
+    
+    vendor = state.get("current_vendor")
+    risk_level = state.get("risk_level", "UNKNOWN")
+    
+    if not vendor:
+        return {"policy_status": "SKIPPED", "messages": [SystemMessage(content="No vendor data for policy check.")]}
+        
+    vendor_name = vendor.get("vendor_name", "")
+    
+    # Step 1: Query Mock Qdrant DB for policies
+    print(f"Searching Qdrant vector DB for policies applicable to: {vendor_name} (Risk: {risk_level})")
+    retrieved_policies = search_procurement_policies(vendor_name, risk_level)
+    
+    if not settings.GEMINI_API_KEY:
+        print("WARNING: No GEMINI API Key, returning stub policy check.")
+        return {"policy_status": "PASS"}
+        
+    # Step 2: LLM evaluates adherence
+    llm = ChatGoogleGenerativeAI(
+        model=settings.DEFAULT_MODEL,
+        google_api_key=settings.GEMINI_API_KEY,
+        temperature=0.1
+    )
+    policy_llm = llm.with_structured_output(PolicyEvaluation)
+    
+    prompt = (
+        "You are an AI Procurement Policy Enforcer. We have extracted vendor details, assessed their risk, "
+        "and retrieved the relevant corporate procurement policies from our vector database.\n"
+        "Your job is to evaluate if this vendor onboarding request complies with the retrieved policies, or if it requires manual review.\n\n"
+        f"VENDOR DETAILS:\nName: {vendor_name}\nRisk Level: {risk_level}\n\n"
+        f"RETRIEVED POLICIES:\n" + "\n".join(retrieved_policies) + "\n\n"
+        "Determine the policy adherence (PASS, FAIL, REQUIRES_REVIEW)."
+    )
+    
+    try:
+        evaluation = policy_llm.invoke(prompt)
+        
+        if isinstance(evaluation, list):
+            evaluation = evaluation[0]
+            
+        if isinstance(evaluation, BaseModel):
+            eval_dict = evaluation.model_dump()
+        elif isinstance(evaluation, dict):
+            eval_dict = evaluation
+        else:
+            eval_dict = getattr(evaluation, "dict", lambda: {})()
+            
+        adherence = eval_dict.get("policy_adherence", "UNKNOWN")
+        print(f"Policy Evaluation Complete: {adherence}")
+        
+        return {
+            "policy_status": adherence,
+            "messages": [SystemMessage(content=f"Policy Check Complete. Status: {adherence}. Flags: {eval_dict.get('policy_flags')}. Reasoning: {eval_dict.get('reasoning')}")]
+        }
+        
+    except Exception as e:
+        print(f"Error in Policy Retrieval: {e}")
+        return {"policy_status": "ERROR"}
+
+
 # Build Graph
 builder = StateGraph(AgentState)
 
@@ -267,6 +332,7 @@ builder.add_node("supervisor", supervisor_node)
 builder.add_node("document_extraction_agent", document_extraction_node)
 builder.add_node("duplicate_detection_agent", duplicate_detection_node)
 builder.add_node("risk_agent", risk_assessment_node)
+builder.add_node("policy_agent", policy_retrieval_node)
 
 # The supervisor determines the next step
 builder.set_entry_point("supervisor")
@@ -279,6 +345,7 @@ builder.add_conditional_edges(
         "document_extraction_agent": "document_extraction_agent",
         "duplicate_detection_agent": "duplicate_detection_agent",
         "risk_agent": "risk_agent",
+        "policy_agent": "policy_agent",
         "END": END
     }
 )
@@ -287,6 +354,7 @@ builder.add_conditional_edges(
 builder.add_edge("document_extraction_agent", "supervisor")
 builder.add_edge("duplicate_detection_agent", "supervisor")
 builder.add_edge("risk_agent", "supervisor")
+builder.add_edge("policy_agent", "supervisor")
 
 graph = builder.compile()
 
@@ -299,7 +367,8 @@ if __name__ == "__main__":
         "messages": [HumanMessage(content="A new vendor just submitted a W-9 form and bank details. Please process.")],
         "current_vendor": None,
         "duplicate_status": None,
-        "risk_level": None
+        "risk_level": None,
+        "policy_status": None
     }
     
     # Run the graph

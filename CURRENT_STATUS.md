@@ -29,7 +29,7 @@ This log tracks the implementation progress of the project based on the Enterpri
 - [x] Implement Document Extraction Agent
 - [x] Implement Duplicate Detection Agent (using mock ERP pg_trgm tool)
 - [x] Implement Risk Agent (using mock OFAC/Sanctions compliance tool)
-- [ ] Implement Policy Retrieval Agent (Qdrant)
+- [x] Implement Policy Retrieval Agent (using mock Qdrant Vector DB tool)
 - [ ] Implement Reasoning & Routing logic
 - [ ] Connect Gemini 2.5 Flash API via Tool Gateway
 - [ ] Implement HITL / Approval Verifier
@@ -61,5 +61,10 @@ We have successfully scaffolded the primary LangGraph execution pipeline, establ
 - **Role:** Evaluates the vendor against global sanctions and country-risk policies.
 - **Implementation:** Uses Gemini to evaluate a `RiskAssessment` schema, assigning a LOW, MEDIUM, or HIGH risk score based on identified compliance factors.
 - **Mock Tool Strategy:** Implemented `services/agent/app/tools/risk.py`. Instead of connecting to expensive, real-world OFAC APIs, this tool mocks an API response by checking the vendor string against heuristic rules (e.g., if the vendor name includes "shell" or the address includes "Syria"). This proves the LLM can act as a competent compliance officer by successfully digesting raw compliance data and outputting a structured risk assessment.
+
+**4. Policy Retrieval Agent (Completed)**
+- **Role:** Retrieves relevant corporate procurement policies based on the vendor's risk profile and evaluates adherence.
+- **Implementation:** Uses Gemini to evaluate a `PolicyEvaluation` schema, verifying if the onboarding request passes corporate governance or requires manual review based on the retrieved policies.
+- **Mock Tool Strategy:** Implemented `services/agent/app/tools/policy.py`. Instead of waiting to populate a live Qdrant vector database with embedded PDF policies, this tool simulates a semantic vector search by returning a hardcoded list of policy strings (e.g., "All HIGH risk vendors require CFO approval") based on the risk level determined in the previous step. This ensures the RAG logic pipeline is fully functional and testable immediately.
 
 *Last Updated: 2026-07-12*

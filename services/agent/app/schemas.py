@@ -22,3 +22,8 @@ class RiskAssessment(BaseModel):
     risk_factors: list[str] = Field(description="List of specific risk factors identified, e.g. 'Sanctions match', 'High-risk country'")
     requires_manual_review: bool = Field(description="True if the risk level is MEDIUM or HIGH, requiring human approval")
     reasoning: str = Field(description="Detailed explanation of how the risk level was determined")
+
+class PolicyEvaluation(BaseModel):
+    policy_adherence: str = Field(description="PASS, FAIL, or REQUIRES_REVIEW based on the vendor and policies")
+    policy_flags: list[str] = Field(description="List of specific policy clauses violated or flagged")
+    reasoning: str = Field(description="Detailed explanation of how the vendor adheres to or violates the retrieved policies")
