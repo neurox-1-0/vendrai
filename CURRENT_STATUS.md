@@ -1,4 +1,4 @@
-# Vendor-to-Pay Multi-Agent Exception System - CURRENT STATUS
+# Vendrai Buildathon Implementation Status
 
 This log tracks the implementation progress of the project based on the Enterprise Engineering Blueprint.
 

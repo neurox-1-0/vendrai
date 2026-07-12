@@ -1,4 +1,4 @@
-# NeuroX: Vendor-to-Pay Multi-Agent Exception System
+# Vendrai: Vendor-to-Pay Multi-Agent Exception System
 
 ## Overview
 This repository contains the implementation of the **Vendor-to-Pay Multi-Agent Exception System** built for the NeuroX 1.0 National Level Buildathon. 
