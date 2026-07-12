@@ -35,10 +35,10 @@ This log tracks the implementation progress of the project based on the Enterpri
 - [ ] Implement HITL / Approval Verifier
 
 ### 5. Frontend UI (Next.js)
-- [ ] Scaffold Next.js dashboard
-- [ ] Case Intake Form
-- [ ] Human Approval Dashboard
-- [ ] Agent Trace / Audit Viewer
+- [x] Scaffold Next.js dashboard (Neumorphic Design System)
+- [x] Case Intake Form (Dynamic W-9 Upload UI)
+- [x] Human Approval Dashboard (Exceptions Queue)
+- [x] Agent Trace / Audit Viewer (LangGraph Timeline)
 
 ---
 

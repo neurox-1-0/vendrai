@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Plus_Jakarta_Sans, DM_Sans } from "next/font/google";
 import "./globals.css";
+import { Sidebar } from "@/components/layout/sidebar";
 
 const plusJakartaSans = Plus_Jakarta_Sans({
   variable: "--font-plus-jakarta",
@@ -31,8 +32,13 @@ export default function RootLayout({
       className={`${plusJakartaSans.variable} ${dmSans.variable} h-full antialiased`}
       suppressHydrationWarning={true}
     >
-      <body className="min-h-full flex flex-col font-body" suppressHydrationWarning={true}>
-        {children}
+      <body className="min-h-full flex h-screen overflow-hidden font-body bg-[var(--color-clay)] text-[var(--color-primary)]" suppressHydrationWarning={true}>
+        <div className="flex w-full h-full">
+          <Sidebar />
+          <main className="flex-1 h-full overflow-y-auto">
+            {children}
+          </main>
+        </div>
       </body>
     </html>
   );
