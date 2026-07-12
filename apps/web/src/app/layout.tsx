@@ -13,7 +13,7 @@ const dmSans = DM_Sans({
 });
 
 export const metadata: Metadata = {
-  title: "Vendor-to-Pay Exception System",
+  title: "Vendrai: Vendor-to-Pay Exception System",
   description: "Enterprise multi-agent exception handling dashboard.",
 };
 

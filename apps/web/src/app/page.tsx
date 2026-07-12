@@ -11,13 +11,14 @@ export default function Dashboard() {
       {/* Sidebar */}
       <aside className="w-64 flex flex-col justify-between p-8 border-r border-[rgba(255,255,255,0.2)] shadow-[var(--shadow-extruded)] z-10 relative">
         <div>
-          <div className="flex items-center gap-4 mb-16">
-            <IconWell className="h-12 w-12 rounded-full">
-              <ShieldCheck className="h-6 w-6" />
-            </IconWell>
+          <div className="flex flex-col gap-4 mb-16">
+            <div className="h-10 relative">
+              <img src="/Black logo.svg" alt="Vendrai Logo" className="h-full w-auto object-contain dark:hidden" />
+              <img src="/White logo.svg" alt="Vendrai Logo" className="h-full w-auto object-contain hidden dark:block" />
+            </div>
             <div>
-              <h1 className="font-display font-extrabold text-xl tracking-tight text-[var(--color-primary)]">NeuroX</h1>
-              <p className="text-xs text-[var(--color-muted)]">Vendor-to-Pay</p>
+              <h1 className="font-display font-extrabold text-xl tracking-tight text-[var(--color-primary)]">Vendrai</h1>
+              <p className="text-xs text-[var(--color-muted)]">Vendor-to-Pay System</p>
             </div>
           </div>
           
