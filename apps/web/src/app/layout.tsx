@@ -15,6 +15,9 @@ const dmSans = DM_Sans({
 export const metadata: Metadata = {
   title: "Vendrai: Vendor-to-Pay Exception System",
   description: "Enterprise multi-agent exception handling dashboard.",
+  icons: {
+    icon: "/favicon.svg?v=2",
+  },
 };
 
 export default function RootLayout({
@@ -26,8 +29,11 @@ export default function RootLayout({
     <html
       lang="en"
       className={`${plusJakartaSans.variable} ${dmSans.variable} h-full antialiased`}
+      suppressHydrationWarning={true}
     >
-      <body className="min-h-full flex flex-col font-body">{children}</body>
+      <body className="min-h-full flex flex-col font-body" suppressHydrationWarning={true}>
+        {children}
+      </body>
     </html>
   );
 }
