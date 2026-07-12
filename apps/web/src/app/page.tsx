@@ -163,7 +163,60 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Toast Notification */}
+      {/* Bottom Row - Activity & Logs */}
+      <div className="px-12 pb-12 grid grid-cols-1 lg:grid-cols-2 gap-12 z-0 relative">
+        {/* Recent Activity Feed */}
+        <Card className="p-8">
+          <h3 className="font-bold text-xl mb-6 flex items-center gap-2">
+            <Activity className="w-5 h-5 text-[var(--color-accent)]" /> Recent Activity
+          </h3>
+          <div className="space-y-6 relative before:absolute before:inset-0 before:ml-2.5 before:-translate-x-px before:h-full before:w-0.5 before:bg-[var(--color-clay)] before:shadow-[var(--shadow-extruded-sm)]">
+            {[
+              { id: 'CASE-8493', action: 'Invoice Extracted', time: 'Just now', color: 'bg-blue-500' },
+              { id: 'CASE-8492', action: 'Flagged for OFAC Review', time: '2 mins ago', color: 'bg-red-500' },
+              { id: 'CASE-8491', action: 'Tolerance Exceeded (15%)', time: '1 hour ago', color: 'bg-yellow-500' },
+              { id: 'CASE-8490', action: 'Approved by CFO', time: '3 hours ago', color: 'bg-green-500' },
+            ].map((item, i) => (
+              <div key={i} className="relative flex items-start gap-6 group">
+                <div className={`w-5 h-5 rounded-full shadow-[var(--shadow-extruded-sm)] border-4 border-[var(--color-clay)] ${item.color} z-10 shrink-0 mt-1`} />
+                <div className="bg-[var(--color-clay)] p-4 rounded-2xl shadow-[var(--shadow-inset-sm)] flex-1 group-hover:shadow-[var(--shadow-inset-deep)] transition-shadow">
+                  <div className="flex justify-between items-start mb-1">
+                    <span className="font-bold text-sm text-[var(--color-primary)]">{item.id}</span>
+                    <span className="text-xs text-[var(--color-muted)]">{item.time}</span>
+                  </div>
+                  <p className="text-sm text-[var(--color-muted)]">{item.action}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+
+        {/* Live Agent Logs */}
+        <Card className="p-8 flex flex-col">
+          <h3 className="font-bold text-xl mb-6 flex items-center gap-2">
+            <FileText className="w-5 h-5 text-[var(--color-accent)]" /> Live Agent Trace
+          </h3>
+          <div className="flex-1 bg-[#1e293b] rounded-2xl p-6 font-mono text-sm overflow-hidden relative shadow-[var(--shadow-inset-deep)] border border-[rgba(255,255,255,0.1)]">
+            <div className="absolute top-0 left-0 w-full h-8 bg-gradient-to-b from-[#1e293b] to-transparent z-10" />
+            <div className="space-y-3 text-gray-400">
+              <p><span className="text-blue-400">[Supervisor]</span> Initializing CASE-8493 investigation...</p>
+              <p><span className="text-green-400">[Document]</span> Extracting Invoice-990.pdf (Confidence: 98%)</p>
+              <p><span className="text-green-400">[Document]</span> Found PO: PO-2026-9042</p>
+              <p><span className="text-yellow-400">[Duplicate]</span> Querying ERP for vendor match...</p>
+              <p><span className="text-purple-400">[Risk]</span> Checking OFAC DB for 'Acme Corp'...</p>
+              <motion.p 
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ repeat: Infinity, duration: 1.5, repeatType: 'reverse' }}
+                className="text-white"
+              >
+                <span className="text-accent-400">[Policy]</span> Retrieving standard tolerance rules...
+              </motion.p>
+            </div>
+            <div className="absolute bottom-0 left-0 w-full h-12 bg-gradient-to-t from-[#1e293b] to-transparent z-10" />
+          </div>
+        </Card>
+      </div>      {/* Toast Notification */}
       <AnimatePresence>
         {showReportToast && (
           <motion.div
