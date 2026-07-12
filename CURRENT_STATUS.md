@@ -13,12 +13,12 @@ This log tracks the implementation progress of the project based on the Enterpri
 
 ### 2. Database & Data Layer
 - [x] Define authoritative PostgreSQL schema (with pgvector)
-- [ ] Migrate SQL schema to Alembic migrations (Python API)
+- [x] Migrate SQL schema to Alembic migrations (Python API)
 - [ ] Seed test users and roles
 - [ ] Initialize Qdrant collections
 
 ### 3. Core API (FastAPI)
-- [ ] Configure FastAPI app and middleware
+- [x] Configure FastAPI app and middleware
 - [ ] Implement Authentication / Keycloak integration
 - [ ] Implement Case Management endpoints
 - [ ] Implement Document Upload endpoints
