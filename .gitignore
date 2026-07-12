@@ -16,6 +16,7 @@ Thumbs.db
 Proposal/
 Project Plan/
 UML diagrams/
+Database Schema/
 
 # Ignore all markdown files except README and CURRENT_STATUS
 *.md
