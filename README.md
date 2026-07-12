@@ -55,8 +55,15 @@ The frontend is built with a modern, high-fidelity Next.js interface optimized f
 
 ### 2. Environment Configuration
 Copy the sample environment file and add your actual API keys:
+
+**For macOS/Linux:**
 ```bash
 cp .env.example .env
+```
+
+**For Windows (PowerShell):**
+```powershell
+Copy-Item .env.example -Destination .env
 ```
 Make sure to add your `GEMINI_API_KEY` and your OCR API keys to the `.env` file.
 
@@ -66,7 +73,60 @@ Run the following command to spin up PostgreSQL, Qdrant, Redis, MinIO, and Langf
 docker compose up -d
 ```
 
-### 4. Database Initialization
+### 4. Start the Web App (Frontend)
+To see the UI and interact with the application, start the Next.js development server. Open a new terminal and run:
+
+```bash
+cd apps/web
+npm install
+npm run dev
+```
+The application will be available at [http://localhost:3000](http://localhost:3000).
+
+### 5. Start the Core API (Backend)
+To start the FastAPI backend for the system, open another terminal and run:
+
+**For macOS/Linux:**
+```bash
+cd services/api
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn app.main:app --reload
+```
+
+**For Windows:**
+```powershell
+cd services\api
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+uvicorn app.main:app --reload
+```
+The API documentation will be available at [http://localhost:8000/docs](http://localhost:8000/docs).
+
+### 6. Start the Agent Worker
+To start the LangGraph agent orchestrator, open another terminal and run:
+
+**For macOS/Linux:**
+```bash
+cd services/agent
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python -m app.graph
+```
+
+**For Windows:**
+```powershell
+cd services\agent
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+python -m app.graph
+```
+
+### 7. Database Initialization
 *(Database migration scripts via Alembic pending implementation)*
 
 ## Implementation Status
