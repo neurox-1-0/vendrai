@@ -13,9 +13,9 @@ ehthumbs.db
 Thumbs.db
 
 # Project-specific ignored documents
-Proposal/
+Proposal/*
+!Proposal/*.pdf
 Project Plan/
-UML diagrams/
 Database Schema/
 
 # Ignore all markdown files except README and CURRENT_STATUS
