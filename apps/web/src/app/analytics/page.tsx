@@ -34,10 +34,10 @@ export default function AnalyticsDashboard() {
       {/* KPI Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8 mb-12">
         {[
-          { label: 'Avg Resolution Time', value: '11.2m', icon: Clock, desc: '-45% from manual' },
-          { label: 'OCR Confidence', value: '94.5%', icon: ShieldCheck, desc: 'Target: >90%' },
-          { label: 'Autonomous Actions', value: '1,248', icon: Zap, desc: 'This week' },
-          { label: 'Duplicate Hits', value: '142', icon: Activity, desc: 'Avoided ERP mess' },
+          { label: 'Avg Resolution Time', value: '11.2m', icon: Clock, desc: '-45% from manual', color: 'text-blue-500', bg: 'bg-blue-500/10' },
+          { label: 'OCR Confidence', value: '94.5%', icon: ShieldCheck, desc: 'Target: >90%', color: 'text-green-500', bg: 'bg-green-500/10' },
+          { label: 'Autonomous Actions', value: '1,248', icon: Zap, desc: 'This week', color: 'text-yellow-500', bg: 'bg-yellow-500/10' },
+          { label: 'Duplicate Hits', value: '142', icon: Activity, desc: 'Avoided ERP mess', color: 'text-purple-500', bg: 'bg-purple-500/10' },
         ].map((kpi, i) => (
           <motion.div
             key={i}
@@ -46,12 +46,12 @@ export default function AnalyticsDashboard() {
             transition={{ delay: i * 0.1 }}
           >
             <Card className="p-6 h-full flex flex-col justify-center relative overflow-hidden group">
-              <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
-                <kpi.icon className="w-16 h-16 text-[var(--color-accent)]" />
+              <div className={`absolute top-4 right-4 p-3 rounded-xl ${kpi.bg} transition-transform group-hover:scale-110`}>
+                <kpi.icon className={`w-8 h-8 ${kpi.color}`} />
               </div>
-              <p className="text-sm font-bold text-[var(--color-muted)] uppercase tracking-wider mb-2">{kpi.label}</p>
-              <p className="font-display font-extrabold text-4xl mb-2">{kpi.value}</p>
-              <p className="text-sm text-[var(--color-success)]">{kpi.desc}</p>
+              <p className="text-sm font-bold text-[var(--color-muted)] uppercase tracking-wider mb-2 relative z-10">{kpi.label}</p>
+              <p className="font-display font-extrabold text-4xl mb-2 relative z-10">{kpi.value}</p>
+              <p className="text-sm text-[var(--color-success)] relative z-10">{kpi.desc}</p>
             </Card>
           </motion.div>
         ))}
