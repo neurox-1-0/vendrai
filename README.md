@@ -21,6 +21,31 @@ The project is structured as a **modular monorepo** with the following core laye
 - **Document Processing:** Docling + Free-Tier OCR API
 - **Observability:** Langfuse + OpenTelemetry
 
+## Frontend UI Previews
+
+The frontend is built with a modern, high-fidelity Next.js interface optimized for enterprise AP and Procurement teams.
+
+### 1. Active Dashboard & Agent Trace Feed
+![Dashboard](apps/web/public/frontend%20screenshots/1.png)
+
+### 2. Multi-Flow Case Intake Form
+![Case Intake Form](apps/web/public/frontend%20screenshots/2.png)
+
+### 3. Human Exceptions Approval Queue
+![Approval Queue](apps/web/public/frontend%20screenshots/3.png)
+
+### 4. Human-In-The-Loop Document Viewer
+![HITL Verification](apps/web/public/frontend%20screenshots/4.png)
+
+### 5. Enterprise Performance Analytics
+![Analytics Dashboard](apps/web/public/frontend%20screenshots/5.png)
+
+### 6. Compliance Reports Export
+![Reports Export](apps/web/public/frontend%20screenshots/6.png)
+
+### 7. Global Navigation & Dropdowns
+![Navigation](apps/web/public/frontend%20screenshots/7.png)
+
 ## Local Setup
 
 ### 1. Prerequisites
