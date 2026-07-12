@@ -14,7 +14,7 @@ app.include_router(documents.router)
 
 @app.get("/")
 async def root():
-    return {"message": "Welcome to NeuroX Vendor-to-Pay System"}
+    return {"message": "Welcome to Vendrai Vendor-to-Pay System"}
 
 @app.get("/health")
 async def health_check():
