@@ -5,7 +5,7 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { IconWell } from '@/components/ui/icon-well';
-import { Search, Activity, Bell, FileText, X } from 'lucide-react';
+import { Search, Activity, Bell, FileText, X, LogOut, User } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -21,6 +21,7 @@ const data = [
 
 export default function Dashboard() {
   const [showNotifications, setShowNotifications] = useState(false);
+  const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [showReportToast, setShowReportToast] = useState(false);
 
   const handleGenerateReport = () => {
@@ -76,8 +77,42 @@ export default function Dashboard() {
             </AnimatePresence>
           </div>
           
-          <div className="h-12 w-12 rounded-full shadow-[var(--shadow-extruded)] border-2 border-[var(--color-clay)] overflow-hidden cursor-pointer hover:scale-105 transition-transform">
-            <img src="/user-image.jpg" alt="User Avatar" className="h-full w-full object-cover" onError={(e) => e.currentTarget.src = "https://ui-avatars.com/api/?name=Admin+User&background=6C63FF&color=fff"} />
+          <div className="relative">
+            <div 
+              onClick={() => setShowProfileMenu(!showProfileMenu)}
+              className="h-12 w-12 rounded-full shadow-[var(--shadow-extruded)] border-2 border-[var(--color-clay)] overflow-hidden cursor-pointer hover:scale-105 transition-transform"
+            >
+              <img src="/user-image.jpg" alt="User Avatar" className="h-full w-full object-cover" onError={(e) => e.currentTarget.src = "https://ui-avatars.com/api/?name=Admin+User&background=6C63FF&color=fff"} />
+            </div>
+            
+            <AnimatePresence>
+              {showProfileMenu && (
+                <motion.div 
+                  initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                  className="absolute right-0 mt-4 w-64 bg-[var(--color-clay)] rounded-2xl shadow-[var(--shadow-extruded)] border border-[rgba(255,255,255,0.3)] z-50 overflow-hidden"
+                >
+                  <div className="p-4 border-b border-[rgba(255,255,255,0.2)] flex items-center gap-3">
+                    <div className="h-10 w-10 shrink-0 rounded-xl shadow-[var(--shadow-extruded-sm)] overflow-hidden bg-gray-300">
+                      <img src="/user-image.jpg" alt="User" className="h-full w-full object-cover" onError={(e) => e.currentTarget.src = "https://ui-avatars.com/api/?name=Admin+User&background=6C63FF&color=fff"} />
+                    </div>
+                    <div className="truncate">
+                      <p className="text-sm font-bold text-[var(--color-primary)] truncate">Admin User</p>
+                      <p className="text-xs text-[var(--color-muted)] truncate">admin@vendrai.ai</p>
+                    </div>
+                  </div>
+                  <div className="p-2">
+                    <button className="w-full flex items-center gap-3 px-4 py-2 text-sm text-[var(--color-primary)] rounded-xl hover:bg-[rgba(108,99,255,0.1)] transition-colors">
+                      <User className="h-4 w-4" /> Profile Settings
+                    </button>
+                    <button className="w-full flex items-center gap-3 px-4 py-2 text-sm text-red-500 rounded-xl hover:bg-[rgba(239,68,68,0.1)] transition-colors mt-1">
+                      <LogOut className="h-4 w-4" /> Log out
+                    </button>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
         </div>
       </header>

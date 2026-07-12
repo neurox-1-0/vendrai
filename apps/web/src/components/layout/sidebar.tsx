@@ -57,21 +57,6 @@ export function Sidebar() {
             <Settings className="h-5 w-5" /> Settings
           </Button>
         </nav>
-        
-        <div className="flex items-center justify-between bg-[var(--color-clay)] p-3 rounded-2xl shadow-[var(--shadow-inset-sm)] mt-4 border border-[rgba(255,255,255,0.5)]">
-          <div className="flex items-center gap-3 overflow-hidden">
-            <div className="h-10 w-10 shrink-0 rounded-xl shadow-[var(--shadow-extruded-sm)] overflow-hidden bg-gray-300">
-              <img src="/user-image.jpg" alt="User" className="h-full w-full object-cover" onError={(e) => e.currentTarget.src = "https://ui-avatars.com/api/?name=Admin+User&background=6C63FF&color=fff"} />
-            </div>
-            <div className="truncate">
-              <p className="text-sm font-bold text-[var(--color-primary)] truncate">Admin User</p>
-              <p className="text-xs text-[var(--color-muted)] truncate">admin@vendrai.ai</p>
-            </div>
-          </div>
-          <button className="p-2 text-[var(--color-muted)] hover:text-red-500 transition-colors">
-            <LogOut className="h-4 w-4" />
-          </button>
-        </div>
       </div>
     </aside>
   );
