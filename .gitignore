@@ -18,10 +18,11 @@ Proposal/*
 Project Plan/
 Database Schema/
 
-# Ignore all markdown files except README and CURRENT_STATUS
+# Ignore all markdown files except README, CURRENT_STATUS, and MASTER_TODO
 *.md
 !README.md
 !CURRENT_STATUS.md
+!MASTER_TODO.md
 
 # Node/Python specific ignores
 node_modules/
