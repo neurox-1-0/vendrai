@@ -4,7 +4,7 @@ import React from 'react';
 import { Card } from '@/components/ui/card';
 import { IconWell } from '@/components/ui/icon-well';
 import { Activity, Clock, ShieldCheck, Zap } from 'lucide-react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, PieChart, Pie, Cell, Legend } from 'recharts';
 import { motion } from 'framer-motion';
 
 const processingTimeData = [
@@ -58,43 +58,102 @@ export default function AnalyticsDashboard() {
       </div>
 
       {/* Charts Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 flex-1 min-h-[400px]">
-        <Card className="p-8 flex flex-col">
-          <h3 className="font-bold text-xl mb-6">Processing Time (Minutes)</h3>
-          <div className="flex-1 bg-[var(--color-clay)] rounded-2xl shadow-[var(--shadow-inset-sm)] p-4">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-12 flex-1 min-h-[400px]">
+        {/* Exceptions Breakdown (Donut Chart) */}
+        <Card className="p-8 flex flex-col relative">
+          <div className="mb-6">
+            <h3 className="font-bold text-xl mb-1">Exceptions Breakdown</h3>
+            <p className="text-xs text-[var(--color-muted)]">Identifies systemic procurement issues</p>
+          </div>
+          <div className="flex-1 bg-[var(--color-clay)] rounded-2xl shadow-[var(--shadow-inset-sm)] p-4 flex items-center justify-center relative">
+            
+            {/* Center Label for Donut Hole */}
+            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none pb-8">
+              <span className="text-3xl font-display font-extrabold text-[var(--color-primary)]">100</span>
+              <span className="text-xs font-bold text-[var(--color-muted)] uppercase tracking-wider">Total</span>
+            </div>
+
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={processingTimeData} margin={{ top: 20, right: 30, left: -20, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(0,0,0,0.05)" />
-                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: 'var(--color-muted)', fontSize: 12}} dy={10} />
-                <YAxis axisLine={false} tickLine={false} tick={{fill: 'var(--color-muted)', fontSize: 12}} />
+              <PieChart>
+                <Pie
+                  data={[
+                    { name: 'Price Variance', value: 45, color: '#3b82f6' },
+                    { name: 'Missing PO', value: 25, color: '#eab308' },
+                    { name: 'Policy Violation', value: 20, color: '#a855f7' },
+                    { name: 'Sanctions Risk', value: 10, color: '#ef4444' },
+                  ]}
+                  innerRadius={110}
+                  outerRadius={140}
+                  paddingAngle={5}
+                  dataKey="value"
+                  stroke="none"
+                >
+                  {
+                    [
+                      { name: 'Price Variance', value: 45, color: '#3b82f6' },
+                      { name: 'Missing PO', value: 25, color: '#eab308' },
+                      { name: 'Policy Violation', value: 20, color: '#a855f7' },
+                      { name: 'Sanctions Risk', value: 10, color: '#ef4444' },
+                    ].map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={entry.color} />
+                    ))
+                  }
+                </Pie>
                 <Tooltip 
-                  cursor={{fill: 'rgba(108,99,255,0.05)'}}
                   contentStyle={{ backgroundColor: 'var(--color-clay)', borderRadius: '12px', border: 'none', boxShadow: '5px 5px 10px rgba(163, 177, 198, 0.6), -5px -5px 10px rgba(255, 255, 255, 0.5)' }}
                   itemStyle={{ color: 'var(--color-primary)', fontWeight: 'bold' }}
                 />
-                <Bar dataKey="minutes" fill="var(--color-accent)" radius={[6, 6, 0, 0]} barSize={40} />
-              </BarChart>
+                <Legend 
+                  verticalAlign="bottom" 
+                  height={36} 
+                  iconType="circle"
+                  wrapperStyle={{ fontSize: '12px', color: 'var(--color-muted)', fontWeight: '600', paddingTop: '20px' }}
+                />
+              </PieChart>
             </ResponsiveContainer>
           </div>
         </Card>
 
-        <Card className="p-8 flex flex-col">
-          <h3 className="font-bold text-xl mb-6">Agent Extraction Accuracy (%)</h3>
-          <div className="flex-1 bg-[var(--color-clay)] rounded-2xl shadow-[var(--shadow-inset-sm)] p-4">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={ocrAccuracyData} margin={{ top: 20, right: 30, left: -20, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(0,0,0,0.05)" />
-                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: 'var(--color-muted)', fontSize: 12}} dy={10} />
-                <YAxis domain={[80, 100]} axisLine={false} tickLine={false} tick={{fill: 'var(--color-muted)', fontSize: 12}} />
-                <Tooltip 
-                  contentStyle={{ backgroundColor: 'var(--color-clay)', borderRadius: '12px', border: 'none', boxShadow: '5px 5px 10px rgba(163, 177, 198, 0.6), -5px -5px 10px rgba(255, 255, 255, 0.5)' }}
-                  itemStyle={{ color: 'var(--color-success)', fontWeight: 'bold' }}
-                />
-                <Line type="monotone" dataKey="accuracy" stroke="var(--color-success)" strokeWidth={4} dot={{ fill: 'var(--color-success)', strokeWidth: 2, r: 4 }} activeDot={{ r: 8 }} />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-        </Card>
+        <div className="lg:col-span-2 space-y-12 flex flex-col">
+          {/* Existing Processing Time Chart */}
+          <Card className="p-8 flex flex-col flex-1">
+            <h3 className="font-bold text-xl mb-6">Processing Time (Minutes)</h3>
+            <div className="flex-1 bg-[var(--color-clay)] rounded-2xl shadow-[var(--shadow-inset-sm)] p-4">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={processingTimeData} margin={{ top: 20, right: 30, left: -20, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(0,0,0,0.05)" />
+                  <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: 'var(--color-muted)', fontSize: 12}} dy={10} />
+                  <YAxis axisLine={false} tickLine={false} tick={{fill: 'var(--color-muted)', fontSize: 12}} />
+                  <Tooltip 
+                    cursor={{fill: 'rgba(108,99,255,0.05)'}}
+                    contentStyle={{ backgroundColor: 'var(--color-clay)', borderRadius: '12px', border: 'none', boxShadow: '5px 5px 10px rgba(163, 177, 198, 0.6), -5px -5px 10px rgba(255, 255, 255, 0.5)' }}
+                    itemStyle={{ color: 'var(--color-primary)', fontWeight: 'bold' }}
+                  />
+                  <Bar dataKey="minutes" fill="var(--color-accent)" radius={[6, 6, 0, 0]} barSize={40} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </Card>
+
+          {/* Agent Extraction Accuracy Chart */}
+          <Card className="p-8 flex flex-col flex-1">
+            <h3 className="font-bold text-xl mb-6">Agent Extraction Accuracy (%)</h3>
+            <div className="flex-1 bg-[var(--color-clay)] rounded-2xl shadow-[var(--shadow-inset-sm)] p-4">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={ocrAccuracyData} margin={{ top: 20, right: 30, left: -20, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(0,0,0,0.05)" />
+                  <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: 'var(--color-muted)', fontSize: 12}} dy={10} />
+                  <YAxis domain={[80, 100]} axisLine={false} tickLine={false} tick={{fill: 'var(--color-muted)', fontSize: 12}} />
+                  <Tooltip 
+                    contentStyle={{ backgroundColor: 'var(--color-clay)', borderRadius: '12px', border: 'none', boxShadow: '5px 5px 10px rgba(163, 177, 198, 0.6), -5px -5px 10px rgba(255, 255, 255, 0.5)' }}
+                    itemStyle={{ color: 'var(--color-success)', fontWeight: 'bold' }}
+                  />
+                  <Line type="monotone" dataKey="accuracy" stroke="var(--color-success)" strokeWidth={4} dot={{ fill: 'var(--color-success)', strokeWidth: 2, r: 4 }} activeDot={{ r: 8 }} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </Card>
+        </div>
       </div>
     </div>
   );
