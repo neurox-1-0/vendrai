@@ -6,6 +6,8 @@ from pydantic import BaseModel, Field
 
 from app.config import settings
 from app.state import AgentState
+from app.schemas import SupplierDocumentFields
+from app.tools.ocr import extract_text_from_document
 
 # Setup Gemini Model
 if not settings.GEMINI_API_KEY:
@@ -37,10 +39,14 @@ def supervisor_node(state: AgentState) -> dict:
     
     system_prompt = (
         "You are the Supervisor Agent for the Vendor-to-Pay Exception System. "
-        "Your job is to read the case context and route to the correct specialist agent.\n"
-        "- If documents need to be read, route to 'document_extraction_agent'.\n"
-        "- If vendor data exists but risk hasn't been checked, route to 'risk_agent'.\n"
-        "- If all tasks are done, route to 'END'."
+        "Your job is to route to the correct specialist agent based on the CURRENT STATE.\n\n"
+        f"CURRENT STATE:\n"
+        f"- Vendor Extracted: {'YES' if state.get('current_vendor') else 'NO'}\n"
+        f"- Risk Checked: {'YES' if state.get('risk_level') else 'NO'}\n\n"
+        "ROUTING RULES:\n"
+        "1. If Vendor Extracted is NO, route to 'document_extraction_agent'.\n"
+        "2. If Vendor Extracted is YES but Risk Checked is NO, route to 'risk_agent'.\n"
+        "3. If both are YES, route to 'END'."
     )
     
     messages = [SystemMessage(content=system_prompt)] + list(state.get("messages", []))
@@ -63,12 +69,60 @@ def supervisor_node(state: AgentState) -> dict:
         print(f"Error in Supervisor: {e}")
         return {"next_node": "END"}
 
-def document_extraction_stub(state: AgentState) -> dict:
-    print("--- DOCUMENT EXTRACTION AGENT ---")
-    return {
-        "messages": [SystemMessage(content="Extracted data from documents successfully.")],
-        "current_vendor": {"name": "Extracted Vendor Inc.", "tax_id": "12345"}
-    }
+def document_extraction_node(state: AgentState) -> dict:
+    print(f"--- DOCUMENT EXTRACTION AGENT --- Case: {state.get('case_id')}")
+    
+    if not settings.GEMINI_API_KEY:
+        print("WARNING: No GEMINI_API_KEY found. Returning stub data.")
+        return {
+            "messages": [SystemMessage(content="Extracted data from documents successfully (STUB).")],
+            "current_vendor": {"vendor_name": "Extracted Vendor Inc.", "tax_id": "12345"}
+        }
+        
+    try:
+        # Step 1: Call OCR tool
+        ocr_text = extract_text_from_document() # Using simulation mode by default for MVP unless URL is passed
+        print("OCR Text Extracted successfully.")
+        
+        # Step 2: Extract structured data using LLM
+        llm = ChatGoogleGenerativeAI(
+            model=settings.DEFAULT_MODEL,
+            google_api_key=settings.GEMINI_API_KEY,
+            temperature=0.0
+        )
+        extraction_llm = llm.with_structured_output(SupplierDocumentFields)
+        
+        prompt = (
+            "Extract the following supplier details from the OCR text provided below. "
+            "If a field is not present, leave it null/None.\n\n"
+            f"OCR TEXT:\n{ocr_text}"
+        )
+        
+        extracted_data = extraction_llm.invoke(prompt)
+        
+        # Handle response format
+        if isinstance(extracted_data, list):
+            extracted_data = extracted_data[0]
+            
+        if isinstance(extracted_data, BaseModel):
+            vendor_dict = extracted_data.model_dump()
+        elif isinstance(extracted_data, dict):
+            vendor_dict = extracted_data
+        else:
+            vendor_dict = getattr(extracted_data, "dict", lambda: {})()
+            
+        print(f"Extracted Vendor Data: {vendor_dict}")
+        
+        return {
+            "messages": [SystemMessage(content=f"Document Extraction Complete. Found vendor: {vendor_dict.get('vendor_name', 'Unknown')}")],
+            "current_vendor": vendor_dict
+        }
+        
+    except Exception as e:
+        print(f"Error in Document Extraction: {e}")
+        return {
+            "messages": [SystemMessage(content=f"Document Extraction failed: {str(e)}")]
+        }
 
 def risk_agent_stub(state: AgentState) -> dict:
     print("--- RISK AGENT ---")
@@ -81,7 +135,7 @@ def risk_agent_stub(state: AgentState) -> dict:
 builder = StateGraph(AgentState)
 
 builder.add_node("supervisor", supervisor_node)
-builder.add_node("document_extraction_agent", document_extraction_stub)
+builder.add_node("document_extraction_agent", document_extraction_node)
 builder.add_node("risk_agent", risk_agent_stub)
 
 # The supervisor determines the next step

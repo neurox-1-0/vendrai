@@ -13,5 +13,9 @@ class Settings(BaseSettings):
     # LLM Configuration
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
     DEFAULT_MODEL: str = "gemini-2.5-flash"
+    
+    # OCR Integration
+    OCR_API_URL: str = os.getenv("OCR_API_URL", "https://api.ocr.space/parse/image")
+    OCR_API_KEY: str = os.getenv("OCR_API_KEY", "")
 
 settings = Settings()
