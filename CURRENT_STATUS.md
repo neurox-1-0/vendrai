@@ -20,8 +20,8 @@ This log tracks the implementation progress of the project based on the Enterpri
 ### 3. Core API (FastAPI)
 - [x] Configure FastAPI app and middleware
 - [ ] Implement Authentication / Keycloak integration
-- [ ] Implement Case Management endpoints
-- [ ] Implement Document Upload endpoints
+- [x] Implement Case Management endpoints
+- [x] Implement Document Upload endpoints
 - [ ] Implement Approval Queue endpoints
 
 ### 4. Agent Runtime (LangGraph)
