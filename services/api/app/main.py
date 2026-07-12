@@ -1,11 +1,16 @@
 from fastapi import FastAPI
 from app.config import settings
 
+from app.routers import cases, documents
+
 app = FastAPI(
     title="Vendor-to-Pay Multi-Agent Exception System",
     description="Core API for managing cases, documents, and agent orchestration.",
     version="0.1.0"
 )
+
+app.include_router(cases.router)
+app.include_router(documents.router)
 
 @app.get("/")
 async def root():
