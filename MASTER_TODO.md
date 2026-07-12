@@ -36,10 +36,11 @@ To ensure stable architecture, tasks MUST be executed in this sequence:
 ## 3. Frontend Application (Next.js)
 *Dependency: Existing Neumorphic Atoms (Card, Button, Input).*
 
-- [ ] **Case Intake Form**: Build the initial "New Supplier" form allowing users to input basic vendor metadata and upload PDF documents. Must use Neumorphic inputs.
-- [ ] **Agent Trace & Audit Viewer**: Build a live timeline UI that connects to the FastAPI SSE endpoint to show the LangGraph agents thinking in real-time.
-- [ ] **Human Approval Dashboard**: Build a detailed view for "Pending Approval" cases, showing the Evidence Packet side-by-side with the uploaded document.
-- [ ] **API Integration (React Query / Fetch)**: Replace the hardcoded mock data in the Dashboard with real data fetched from FastAPI `/cases` and `/metrics`.
+- [x] **Case Intake Form**: Built the initial "New Supplier" and "Invoice Exception" dynamic form supporting vendor metadata and mock PDF upload logic.
+- [x] **Agent Trace & Audit Viewer**: Built the mock timeline UI on the Dashboard to represent LangGraph agents thinking. (Needs SSE API wiring).
+- [x] **Human Approval Dashboard**: Built a detailed view for "Pending Approval" cases, featuring an embedded PDF viewer and mock Evidence Packet.
+- [x] **Analytics & Reports**: Built a full enterprise Analytics dashboard (Recharts) and a Reports export mock page for compliance audits.
+- [ ] **API Integration (CRITICAL GAP)**: Replace all hardcoded mock data in the Dashboard, Intake, and Approvals with real data fetched from FastAPI `/cases` and `/metrics`. Connect human actions to backend state transitions.
 - [ ] **Responsive Navigation**: Implement the mobile-first Hamburger menu for the sidebar.
 
 ## 4. End-to-End Testing & Polish
