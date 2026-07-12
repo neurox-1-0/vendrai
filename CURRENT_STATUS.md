@@ -42,4 +42,24 @@ This log tracks the implementation progress of the project based on the Enterpri
 
 ---
 
+## 📝 Detailed Implementation Notes & Architectural Decisions
+
+### Agent Runtime (Phase 4)
+We have successfully scaffolded the primary LangGraph execution pipeline, establishing the deterministic flow of data between intelligent agents. 
+
+**1. Document Extraction Agent (Completed)**
+- **Role:** Converts unstructured vendor documents (W-9s, Bank Letters) into structured data.
+- **Implementation:** Uses `gemini-2.5-flash` with Pydantic `SupplierDocumentFields` structured output.
+- **Mock Tool Strategy:** Implemented `services/agent/app/tools/ocr.py`. If a real file is not passed, it simulates an `OCR.space` API response by providing a hardcoded string of a typical W-9 form. This allows us to test the LLM's parsing abilities immediately without burning through OCR API rate limits during early development.
+
+**2. Duplicate Detection Agent (Completed)**
+- **Role:** Checks the extracted vendor against existing records to flag duplicates.
+- **Implementation:** Uses Gemini to evaluate a `DuplicateDecision` schema (identifying if it's a match and returning a confidence score).
+- **Mock Tool Strategy:** Since the PostgreSQL database is not yet seeded with real ERP data, we implemented `services/agent/app/tools/duplicate.py`. This tool simulates the `pg_trgm` fuzzy matching PostgreSQL query by searching a hardcoded Python list of mock ERP vendors (e.g., "Vendrai Tech"). This isolates the database dependency, allowing us to prove the LLM can correctly reason about partial string matches right now.
+
+**3. Risk Assessment Agent (Completed)**
+- **Role:** Evaluates the vendor against global sanctions and country-risk policies.
+- **Implementation:** Uses Gemini to evaluate a `RiskAssessment` schema, assigning a LOW, MEDIUM, or HIGH risk score based on identified compliance factors.
+- **Mock Tool Strategy:** Implemented `services/agent/app/tools/risk.py`. Instead of connecting to expensive, real-world OFAC APIs, this tool mocks an API response by checking the vendor string against heuristic rules (e.g., if the vendor name includes "shell" or the address includes "Syria"). This proves the LLM can act as a competent compliance officer by successfully digesting raw compliance data and outputting a structured risk assessment.
+
 *Last Updated: 2026-07-12*
