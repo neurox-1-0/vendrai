@@ -1,21 +1,11 @@
 import type { Metadata } from "next";
-import { Plus_Jakarta_Sans, DM_Sans } from "next/font/google";
 import "./globals.css";
 import { Sidebar } from "@/components/layout/sidebar";
-
-const plusJakartaSans = Plus_Jakarta_Sans({
-  variable: "--font-plus-jakarta",
-  subsets: ["latin"],
-});
-
-const dmSans = DM_Sans({
-  variable: "--font-dm-sans",
-  subsets: ["latin"],
-});
+import { Providers } from "./providers";
 
 export const metadata: Metadata = {
-  title: "Vendrai: Vendor-to-Pay Exception System",
-  description: "Enterprise multi-agent exception handling dashboard.",
+  title: "NeuroX Supplier Onboarding",
+  description: "Evidence-driven enterprise supplier onboarding and human approval.",
   icons: {
     icon: "/favicon.svg?v=2",
   },
@@ -29,15 +19,17 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${plusJakartaSans.variable} ${dmSans.variable} h-full antialiased`}
+      className="h-full antialiased"
       suppressHydrationWarning={true}
     >
       <body className="min-h-full flex h-screen overflow-hidden font-body bg-[var(--color-clay)] text-[var(--color-primary)]" suppressHydrationWarning={true}>
         <div className="flex w-full h-full">
-          <Sidebar />
-          <main className="flex-1 h-full overflow-y-auto">
-            {children}
-          </main>
+          <Providers>
+            <Sidebar />
+            <main className="h-full flex-1 overflow-y-auto pb-20 md:pb-0" id="main-content">
+              {children}
+            </main>
+          </Providers>
         </div>
       </body>
     </html>
