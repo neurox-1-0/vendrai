@@ -1,0 +1,11 @@
+FROM python:3.12.4-slim-bookworm
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 FASTEMBED_CACHE_PATH=/opt/fastembed-cache
+WORKDIR /srv/api
+RUN addgroup --system neurox && adduser --system --ingroup neurox neurox
+COPY services/api/requirements.txt services/api/requirements-retrieval.txt ./
+RUN pip install --requirement requirements.txt --requirement requirements-retrieval.txt
+RUN mkdir -p /opt/fastembed-cache && python -c "from fastembed import TextEmbedding, SparseTextEmbedding; from fastembed.rerank.cross_encoder import TextCrossEncoder; TextEmbedding('sentence-transformers/all-MiniLM-L6-v2'); SparseTextEmbedding('Qdrant/bm25'); TextCrossEncoder('Xenova/ms-marco-MiniLM-L-6-v2')"
+COPY services/api ./
+RUN chown -R neurox:neurox /srv/api /opt/fastembed-cache
+USER neurox
+CMD ["uvicorn", "app.retrieval_service:app", "--host", "0.0.0.0", "--port", "8100"]

@@ -1,67 +1,296 @@
-version: '3.8'
+name: neurox
+
+x-api-image: &api-image
+  build:
+    context: .
+    dockerfile: services/api/Dockerfile
+  image: neurox-api:local
+  restart: unless-stopped
+  env_file: .env
+  environment: &api-environment
+    APP_ENV: ${APP_ENV:-development}
+    AUTH_MODE: ${AUTH_MODE:-development}
+    DATABASE_URL: postgresql+asyncpg://neurox_app:${NEUROX_APP_DB_PASSWORD:?set NEUROX_APP_DB_PASSWORD}@postgres:5432/neurox
+    WORKER_DATABASE_URL: postgresql+asyncpg://neurox_worker:${NEUROX_WORKER_DB_PASSWORD:?set NEUROX_WORKER_DB_PASSWORD}@postgres:5432/neurox
+    RABBITMQ_URL: amqp://neurox:${RABBITMQ_PASSWORD:?set RABBITMQ_PASSWORD}@rabbitmq:5672/neurox
+    REDIS_URL: redis://redis:6379/0
+    QDRANT_URL: http://qdrant:6333
+    RETRIEVAL_URL: http://retrieval-api:8100
+    STORAGE_BACKEND: local
+    LOCAL_STORAGE_ROOT: /var/lib/neurox/objects
+    CLAMAV_HOST: clamav
+    CLAMAV_REQUIRED: "true"
+    SMTP_HOST: mailpit
+    SMTP_PORT: "1025"
+    MOCK_ERP_URL: http://mock-erp:8090
+    KEYCLOAK_ISSUER: http://localhost:8080/realms/neurox
+    KEYCLOAK_JWKS_URL: http://keycloak:8080/realms/neurox/protocol/openid-connect/certs
+    OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+  networks: [app, data]
+  volumes:
+    - object_data:/var/lib/neurox/objects
+
+x-worker-depends: &worker-depends
+  postgres:
+    condition: service_healthy
+  rabbitmq:
+    condition: service_healthy
+  migrate:
+    condition: service_completed_successfully
 
 services:
-  db:
-    image: pgvector/pgvector:pg16
-    container_name: vendortopay_db
-    restart: always
+  postgres:
+    image: postgres:16.9-bookworm
+    restart: unless-stopped
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: vendortopay
-    ports:
-      - "5432:5432"
+      POSTGRES_DB: neurox
+      POSTGRES_USER: neurox_migration
+      POSTGRES_PASSWORD: ${NEUROX_MIGRATION_DB_PASSWORD:?set NEUROX_MIGRATION_DB_PASSWORD}
+      NEUROX_APP_DB_PASSWORD: ${NEUROX_APP_DB_PASSWORD:?set NEUROX_APP_DB_PASSWORD}
+      NEUROX_WORKER_DB_PASSWORD: ${NEUROX_WORKER_DB_PASSWORD:?set NEUROX_WORKER_DB_PASSWORD}
+      NEUROX_RELAY_DB_PASSWORD: ${NEUROX_RELAY_DB_PASSWORD:?set NEUROX_RELAY_DB_PASSWORD}
+      NEUROX_AUDIT_DB_PASSWORD: ${NEUROX_AUDIT_DB_PASSWORD:?set NEUROX_AUDIT_DB_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U neurox_migration -d neurox"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./infra/postgres/001-roles.sh:/docker-entrypoint-initdb.d/001-roles.sh:ro
+    networks: [data]
 
-  qdrant:
-    image: qdrant/qdrant
-    container_name: vendortopay_qdrant
-    restart: always
-    ports:
-      - "6333:6333"
-    volumes:
-      - qdrant_data:/qdrant/storage
+  migrate:
+    <<: *api-image
+    restart: "no"
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      <<: *api-environment
+      DATABASE_URL: postgresql+asyncpg://neurox_migration:${NEUROX_MIGRATION_DB_PASSWORD:?set NEUROX_MIGRATION_DB_PASSWORD}@postgres:5432/neurox
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  rabbitmq:
+    image: rabbitmq:4.1.0-management
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: neurox
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?set RABBITMQ_PASSWORD}
+      RABBITMQ_DEFAULT_VHOST: neurox
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    volumes: [rabbitmq_data:/var/lib/rabbitmq]
+    networks: [data]
 
   redis:
-    image: redis:7-alpine
-    container_name: vendortopay_redis
-    restart: always
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
+    image: redis:7.4.2-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "allkeys-lru"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    volumes: [redis_data:/data]
+    networks: [data]
+
+  qdrant:
+    image: qdrant/qdrant:v1.14.1
+    restart: unless-stopped
+    volumes: [qdrant_data:/qdrant/storage]
+    networks: [data]
 
   minio:
-    image: minio/minio
-    container_name: vendortopay_minio
-    restart: always
-    command: server /data --console-address ":9001"
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    restart: unless-stopped
+    command: ["server", "/data", "--console-address", ":9001"]
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
-    ports:
-      - "9000:9000"
-      - "9001:9001"
-    volumes:
-      - minio_data:/data
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD}
+    volumes: [minio_data:/data]
+    networks: [data]
 
-  langfuse-server:
-    image: langfuse/langfuse:latest
-    container_name: vendortopay_langfuse
-    restart: always
-    depends_on:
-      - db
-    ports:
-      - "3000:3000"
+  clamav:
+    image: clamav/clamav:1.4.2
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/clamdcheck.sh"]
+      interval: 30s
+      timeout: 10s
+      retries: 20
+      start_period: 90s
+    volumes: [clamav_data:/var/lib/clamav]
+    networks: [data]
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.2.5
+    restart: unless-stopped
+    command: ["start-dev", "--import-realm", "--health-enabled=true"]
     environment:
-      - DATABASE_URL=postgresql://postgres:postgres@db:5432/vendortopay
-      - NEXTAUTH_SECRET=mysecret
-      - NEXTAUTH_URL=http://localhost:3000
-      - SALT=mysalt
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:?set KEYCLOAK_ADMIN}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?set KEYCLOAK_ADMIN_PASSWORD}
+      KC_HOSTNAME: http://localhost:8080
+    ports: ["127.0.0.1:8080:8080"]
+    volumes:
+      - ./infra/keycloak/neurox-realm.json:/opt/keycloak/data/import/neurox-realm.json:ro
+    networks: [app]
+
+  opa:
+    image: openpolicyagent/opa:1.5.1-static
+    restart: unless-stopped
+    command: ["run", "--server", "--addr=0.0.0.0:8181", "/policies"]
+    volumes: [./policies:/policies:ro]
+    networks: [app]
+
+  mailpit:
+    image: axllent/mailpit:v1.27.0
+    restart: unless-stopped
+    ports: ["127.0.0.1:8025:8025"]
+    networks: [app]
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.130.0
+    restart: unless-stopped
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes: [./infra/otel/collector.yaml:/etc/otelcol/config.yaml:ro]
+    ports: ["127.0.0.1:4318:4318"]
+    networks: [app]
+
+  api:
+    <<: *api-image
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]
+    depends_on:
+      <<: *worker-depends
+      clamav:
+        condition: service_healthy
+    ports: ["127.0.0.1:8000:8000"]
+
+  outbox-relay:
+    <<: *api-image
+    command: ["python", "-m", "app.workers.outbox"]
+    environment:
+      <<: *api-environment
+      WORKER_DATABASE_URL: postgresql+asyncpg://neurox_relay:${NEUROX_RELAY_DB_PASSWORD:?set NEUROX_RELAY_DB_PASSWORD}@postgres:5432/neurox
+    depends_on: *worker-depends
+
+  document-worker:
+    build:
+      context: .
+      dockerfile: services/api/Dockerfile.document
+    image: neurox-document-worker:local
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      <<: *api-environment
+      DOCUMENT_PROCESSOR: docling
+    command: ["python", "-m", "app.workers.document"]
+    volumes: [object_data:/var/lib/neurox/objects]
+    networks: [app, data]
+    depends_on:
+      <<: *worker-depends
+      clamav:
+        condition: service_healthy
+
+  agent-worker:
+    <<: *api-image
+    command: ["python", "-m", "app.workers.agent"]
+    depends_on:
+      <<: *worker-depends
+      retrieval-api:
+        condition: service_healthy
+
+  retrieval-api:
+    build:
+      context: .
+      dockerfile: services/api/Dockerfile.retrieval
+    image: neurox-retrieval:local
+    restart: unless-stopped
+    env_file: .env
+    environment: *api-environment
+    command: ["uvicorn", "app.retrieval_service:app", "--host", "0.0.0.0", "--port", "8100"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8100/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    networks: [app, data]
+    depends_on:
+      qdrant:
+        condition: service_started
+
+  retrieval-worker:
+    build:
+      context: .
+      dockerfile: services/api/Dockerfile.retrieval
+    image: neurox-retrieval:local
+    restart: unless-stopped
+    env_file: .env
+    environment: *api-environment
+    command: ["python", "-m", "app.workers.retrieval"]
+    networks: [app, data]
+    depends_on: *worker-depends
+
+  notification-worker:
+    <<: *api-image
+    command: ["python", "-m", "app.workers.notification"]
+    depends_on: *worker-depends
+
+  erp-worker:
+    <<: *api-image
+    command: ["python", "-m", "app.workers.erp"]
+    depends_on:
+      <<: *worker-depends
+      mock-erp:
+        condition: service_healthy
+
+  mock-erp:
+    build:
+      context: .
+      dockerfile: services/mock_erp/Dockerfile
+    image: neurox-mock-erp:local
+    restart: unless-stopped
+    environment:
+      ERP_DB_PATH: /var/lib/neurox-erp/erp.sqlite3
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8090/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    volumes: [erp_data:/var/lib/neurox-erp]
+    networks: [app]
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:8000/api/v1
+        NEXT_PUBLIC_AUTH_MODE: ${AUTH_MODE:-development}
+        NEXT_PUBLIC_KEYCLOAK_URL: http://localhost:8080
+    image: neurox-web:local
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_started
+    ports: ["127.0.0.1:3000:3000"]
+    networks: [app]
+
+networks:
+  app:
+  data:
+    internal: true
 
 volumes:
   postgres_data:
-  qdrant_data:
+  rabbitmq_data:
   redis_data:
+  qdrant_data:
   minio_data:
+  clamav_data:
+  object_data:
+  erp_data:

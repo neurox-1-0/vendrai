@@ -1,0 +1,17 @@
+.git
+.github
+.env
+.env.*
+!.env.example
+**/.venv
+**/venv
+**/__pycache__
+**/*.pyc
+**/node_modules
+**/.next
+.data
+Proposal
+Project Plan
+Database Schema
+UML diagrams
+apps/web/public/frontend screenshots
