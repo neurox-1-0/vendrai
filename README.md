@@ -1,136 +1,81 @@
-# Vendrai: Vendor-to-Pay Multi-Agent Exception System
+# NeuroX enterprise supplier onboarding
 
-## Overview
-This repository contains the implementation of the **Vendor-to-Pay Multi-Agent Exception System** built for the NeuroX 1.0 National Level Buildathon. 
+NeuroX is an evidence-driven supplier-onboarding vertical slice. Deterministic controls own authorization, tenant isolation, sanctions blocking, duplicate scoring, approvals and ERP authorization. LLM reasoning is optional, bounded and never receives raw documents or sensitive identifiers.
 
-The system leverages a parallel multi-agent B2B agentic workflow for Procurement and Finance operations. It automates supplier onboarding and invoice exception handling using a stateful LangGraph orchestrator, specialist AI agents, and a strictly enforced human-in-the-loop (HITL) approval mechanism.
+## Runtime boundaries
 
-## System Architecture
+- `web`: Next.js work queues, secure intake, evidence review and notifications.
+- `api`: FastAPI contracts, Keycloak/RBAC, RLS context and durable case events.
+- `outbox-relay`: atomic database-to-RabbitMQ event publication.
+- `document-worker`: quarantine, ClamAV, native PDF parsing, Docling/Tesseract/EasyOCR and local masking.
+- `retrieval-worker` / `retrieval-api`: local dense+sparse policy index, RRF and reranking.
+- `agent-worker`: deterministic duplicate/sanctions/policy aggregation and approval interruption.
+- `notification-worker`: independent in-app/email delivery and delayed retries.
+- `erp-worker` / `mock-erp`: evidence-bound, idempotent vendor creation.
 
-The project is structured as a **modular monorepo** with the following core layers:
-- **Web App (`apps/web`)**: Next.js & TypeScript frontend for procurement, finance, approval, and audit interfaces.
-- **Core API (`services/api`)**: FastAPI backend for case management, documents, authentication, and structured tool access.
-- **Agent Worker (`services/agent`)**: LangGraph orchestrator (Python) handling dynamic reasoning, tool calling, specialist agent routing, and verification.
-- **Knowledge & Database (`db/`)**: PostgreSQL (with pgvector) as the main relational and hybrid database, paired with Qdrant for policy embeddings.
+PostgreSQL is authoritative. RabbitMQ quorum queues carry versioned events. Qdrant is a derived tenant-filtered policy index. Redis is limited to cache/coordination. Documents remain local.
 
-## Technical Stack
-- **Agent Orchestration:** LangGraph
-- **LLM Engine:** Gemini 2.5 Flash API
-- **Vector DB:** Qdrant
-- **Relational DB:** PostgreSQL (with `pgvector` and `pg_trgm`)
-- **Document Processing:** Docling + Free-Tier OCR API
-- **Observability:** Langfuse + OpenTelemetry
+## Local setup
 
-## Frontend UI Previews
+Requirements: Docker Compose, Node.js 22.17+ and Python 3.12+.
 
-The frontend is built with a modern, high-fidelity Next.js interface optimized for enterprise AP and Procurement teams.
-
-### 1. Active Dashboard & Agent Trace Feed
-![Dashboard](apps/web/public/frontend%20screenshots/1.png)
-
-### 2. Multi-Flow Case Intake Form
-![Case Intake Form](apps/web/public/frontend%20screenshots/2.png)
-
-### 3. Human Exceptions Approval Queue
-![Approval Queue](apps/web/public/frontend%20screenshots/3.png)
-
-### 4. Human-In-The-Loop Document Viewer
-![HITL Verification](apps/web/public/frontend%20screenshots/4.png)
-
-### 5. Enterprise Performance Analytics
-![Analytics Dashboard](apps/web/public/frontend%20screenshots/5.png)
-
-### 6. Compliance Reports Export
-![Reports Export](apps/web/public/frontend%20screenshots/6.png)
-
-### 7. Global Navigation & Dropdowns
-![Navigation](apps/web/public/frontend%20screenshots/7.png)
-
-## Local Setup
-
-### 1. Prerequisites
-- Docker and Docker Compose installed.
-- Python 3.11+
-- Node.js 18+
-
-### 2. Environment Configuration
-Copy the sample environment file and add your actual API keys:
-
-**For macOS/Linux:**
 ```bash
 cp .env.example .env
 ```
 
-**For Windows (PowerShell):**
-```powershell
-Copy-Item .env.example -Destination .env
-```
-Make sure to add your `GEMINI_API_KEY` and your OCR API keys to the `.env` file.
-
-### 3. Start Infrastructure
-Run the following command to spin up PostgreSQL, Qdrant, Redis, MinIO, and Langfuse:
-```bash
-docker compose up -d
-```
-
-### 4. Start the Web App (Frontend)
-To see the UI and interact with the application, start the Next.js development server. Open a new terminal and run:
+Replace every `CHANGE_ME` value with independently generated secrets. External LLM calls are disabled by default and are not required for the deterministic onboarding path.
 
 ```bash
-cd apps/web
-npm install
-npm run dev
+docker compose up --build
 ```
-The application will be available at [http://localhost:3000](http://localhost:3000).
 
-### 5. Start the Core API (Backend)
-To start the FastAPI backend for the system, open another terminal and run:
+Open:
 
-**For macOS/Linux:**
+- Web: <http://localhost:3000>
+- API docs in development: <http://localhost:8000/docs>
+- Keycloak: <http://localhost:8080>
+- Mailpit: <http://localhost:8025>
+
+The default Compose profile uses development identity unless `AUTH_MODE=keycloak` is set. For Keycloak mode, create users in the imported `neurox` realm, assign one or more realm roles, and keep PKCE enabled. Production configuration is rejected if development authentication or placeholder service credentials remain.
+
+## Local verification without containers
+
 ```bash
 cd services/api
 python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-uvicorn app.main:app --reload
-```
+.venv/bin/pip install -r requirements.txt
+.venv/bin/pytest -q
 
-**For Windows:**
-```powershell
-cd services\api
-python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
-uvicorn app.main:app --reload
-```
-The API documentation will be available at [http://localhost:8000/docs](http://localhost:8000/docs).
-
-### 6. Start the Agent Worker
-To start the LangGraph agent orchestrator, open another terminal and run:
-
-**For macOS/Linux:**
-```bash
-cd services/agent
+cd ../../services/agent
 python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-python -m app.graph
+.venv/bin/pip install -r requirements.txt
+.venv/bin/pytest -q
+
+cd ../../apps/web
+npm ci
+npm run lint
+npx tsc --noEmit
+npm run build
 ```
 
-**For Windows:**
-```powershell
-cd services\agent
-python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
-python -m app.graph
+## Policy and sanctions data
+
+Create and publish tenant policies through `/api/v1/knowledge/documents`. Publication emits an indexing event; retrieval enforces tenant, role, publication and effective-date filters before ranking.
+
+Official sanctions files are not bundled. Normalize an approved official export to `external_id,name,aliases,countries`, verify its checksum and import it locally:
+
+```bash
+cd services/api
+.venv/bin/python scripts/import_sanctions.py \
+  --source OFAC \
+  --version 2026-07-19 \
+  --source-url https://example.invalid/replace-with-approved-official-url \
+  --file /approved/path/ofac.csv \
+  --sha256 REPLACE_WITH_APPROVED_SHA256
 ```
 
-### 7. Database Initialization
-*(Database migration scripts via Alembic pending implementation)*
+If sanctions or applicable policy data is unavailable, analysis fails closed into a visible verification state.
 
-## Implementation Status
-See [`CURRENT_STATUS.md`](./CURRENT_STATUS.md) for the active log of completed modules and pending tasks.
+## Release truth
 
-## License
-Proprietary / Competition Submission for NeuroX 1.0. All Rights Reserved by Team GMora.
+See [CURRENT_STATUS.md](./CURRENT_STATUS.md) for evidence-backed state and [MASTER_TODO.md](./MASTER_TODO.md) for acceptance blockers. The implementation is not an enterprise release until the remaining integration, security, chaos, load and 100-case evaluation gates pass.
