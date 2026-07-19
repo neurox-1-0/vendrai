@@ -1,51 +1,39 @@
-# Vendrai: Master Engineering TODO & Dependency Flow
+# NeuroX master acceptance TODO
 
-> **🚨 CRITICAL RULE FOR ALL DEVELOPERS & AGENTS:**
-> **YOU MUST ALWAYS UPDATE `CURRENT_STATUS.md` AFTER ANY WORK IS DONE.** 
-> This is the central source of truth for the project's state. If you complete a feature from this list, immediately check off the corresponding box in `CURRENT_STATUS.md` and commit it.
+Only acceptance-test-backed work may move to `VERIFIED` in `CURRENT_STATUS.md`.
 
----
+## P0 — release blockers
 
-## Dependency Flow & Execution Sequence
+- [ ] Run the full Compose stack and verify migration upgrade/downgrade with PostgreSQL 16.
+- [ ] Add live RLS tests using non-superuser API, worker, relay and audit roles.
+- [ ] Add Keycloak token/role/tenant integration tests and production user provisioning runbook.
+- [ ] Persist LangGraph checkpoints with PostgreSQL and test kill/resume at clarification and approval interrupts.
+- [ ] Add official OFAC, UN and EU adapter fixtures, provenance verification, refresh scheduling and stale-list blocking.
+- [ ] Build at least 100 synthetic/anonymized evaluation cases and enforce every numerical gate from the recovery plan.
+- [ ] Add contract tests generated from OpenAPI and versioned event JSON Schemas.
+- [ ] Add Playwright journeys for clean onboarding, duplicate review, sanctions candidate, clarification, OCR correction, rejection, stale approval, cancellation and ERP retry.
+- [ ] Add security fixtures for cross-tenant Qdrant access, malicious PDFs, prompt injection, PII leakage, forged/replayed approvals, expired upload URLs and audit mutation.
+- [ ] Verify RabbitMQ retry/dead-letter behavior through broker and worker restarts; replace in-consumer backoff with tiered retry queues where load tests require it.
+- [ ] Verify notification outages never change case progression.
+- [ ] Add backup/restore test, failure injection, load profile, SBOM and signed image provenance.
 
-To ensure stable architecture, tasks MUST be executed in this sequence:
-1. **Agent Logic (Python/LangGraph)**: The core intelligence must exist before the frontend can display it.
-2. **Backend API (FastAPI)**: Routes must exist to trigger the agents and serve the data.
-3. **Frontend UI (Next.js)**: The UI consumes the API and displays the neumorphic interface.
-4. **End-to-End Integration**: Wiring the UI forms to the API, and handling real-time Server-Sent Events (SSE).
+## P1 — complete the vertical slice
 
----
+- [ ] Add document-page rendering and authorized object-download endpoints with bounding-box overlays and field correction UI.
+- [ ] Generate and version the frontend client from OpenAPI; fail CI when generated contracts drift.
+- [ ] Add Presidio custom financial/vendor recognizers and measure leakage on adversarial fixtures.
+- [ ] Add mixed born-digital/scanned PDF page routing and calibrated OCR confidence thresholds.
+- [ ] Add application OpenTelemetry spans across request, outbox, broker, worker, retrieval, LLM, object storage and ERP boundaries.
+- [ ] Add clarification-task UI and durable response/resume journey.
+- [ ] Add duplicate comparison and sanctions-resolution interfaces with dual-control disposition.
+- [ ] Add role-specific ownership, SLA filters and saved work-queue views.
+- [ ] Add authorized audit export rather than case-summary-only browser exports.
+- [ ] Add Redis rate limiting/cache namespaces and verify tenant-key isolation.
+- [ ] Replace local shared-volume object storage with S3-compatible presigned upload/download adapters; retain local backend only for developer mode.
 
-## 1. Agent & AI Core (LangGraph)
-*Dependency: None. Relies on existing Database Schema and LangGraph Scaffold.*
+## P2 — hardening and later adapters
 
-- [ ] **Document Extraction Agent**: Integrate Docling / free-tier OCR to parse uploaded supplier documents and extract `SupplierDocumentFields`.
-- [ ] **Duplicate Detection Agent**: Use PostgreSQL `pg_trgm` to search for existing vendors and return confidence scores.
-- [ ] **Risk Agent**: Implement mocked/simulated sanctions checking and country-risk matching.
-- [ ] **Policy Agent**: Connect Qdrant vector DB to retrieve procurement policies based on vendor category.
-- [ ] **Reasoning & Clarification Node**: Build the LLM reasoning loop to evaluate evidence, handle contradictions, and trigger Clarification.
-- [ ] **Evidence Builder & Verifier**: Aggregate the run into an immutable "Evidence Packet" and ensure it's safe for human review.
-
-## 2. Backend API (FastAPI)
-*Dependency: Agent Core.*
-
-- [ ] **SSE (Server-Sent Events) Implementation**: Build an endpoint that streams LangGraph execution events in real-time so the frontend can display an active "Agent Trace".
-- [ ] **Approval Queue Endpoints**: `GET /approvals` (fetch pending cases) and `POST /approvals/{id}` (approve/reject with HITL signature).
-- [ ] **Document Upload Endpoints**: Finalize multipart form-data parsing, virus scan simulation, and MinIO storage saving.
-
-## 3. Frontend Application (Next.js)
-*Dependency: Existing Neumorphic Atoms (Card, Button, Input).*
-
-- [x] **Case Intake Form**: Built the initial "New Supplier" and "Invoice Exception" dynamic form supporting vendor metadata and mock PDF upload logic.
-- [x] **Agent Trace & Audit Viewer**: Built the mock timeline UI on the Dashboard to represent LangGraph agents thinking. (Needs SSE API wiring).
-- [x] **Human Approval Dashboard**: Built a detailed view for "Pending Approval" cases, featuring an embedded PDF viewer and mock Evidence Packet.
-- [x] **Analytics & Reports**: Built a full enterprise Analytics dashboard (Recharts) and a Reports export mock page for compliance audits.
-- [ ] **API Integration (CRITICAL GAP)**: Replace all hardcoded mock data in the Dashboard, Intake, and Approvals with real data fetched from FastAPI `/cases` and `/metrics`. Connect human actions to backend state transitions.
-- [ ] **Responsive Navigation**: Implement the mobile-first Hamburger menu for the sidebar.
-
-## 4. End-to-End Testing & Polish
-*Dependency: Frontend + Backend + Agents complete.*
-
-- [ ] **Simulated ERP Sync**: Implement the final step where an approved case writes the vendor master data to a mock ERP.
-- [ ] **E2E Demo Walkthrough**: Run a complete test: Upload Document -> Agents Think -> Flag Duplicate -> Human Overrides -> ERP Syncs.
-- [ ] **Verify Authentication**: Ensure the system handles missing API keys gracefully and fails closed.
+- [ ] Provision the optional Langfuse v3 profile with ClickHouse, Valkey and blob storage.
+- [ ] Add Slack/Teams notification adapters without coupling them to case transitions.
+- [ ] Add Kubernetes manifests only after the Compose acceptance profile passes.
+- [ ] Start invoice-exception functionality only after supplier onboarding meets all gates.
