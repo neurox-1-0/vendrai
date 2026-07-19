@@ -1,133 +1,128 @@
 "use client";
 
-import React from 'react';
-import { Card } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { IconWell } from '@/components/ui/icon-well';
-import { FileText, Copy, AlertTriangle, ShieldAlert, CheckCircle2, Bot, ArrowLeft } from 'lucide-react';
-import { motion } from 'framer-motion';
-import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { useParams } from "next/navigation";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ArrowLeft, CheckCircle2, FileSearch, ShieldAlert, XCircle } from "lucide-react";
+import { api, type ApprovalTask } from "@/lib/api";
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { StatusChip } from "@/components/status-chip";
 
-export default function CaseAuditTrace() {
-  const params = useParams();
-  const caseId = params.id as string;
+export default function CaseDetail() {
+  const caseId = String(useParams().id);
+  const queryClient = useQueryClient();
+  const [comment, setComment] = useState("");
+  const [decisionError, setDecisionError] = useState("");
+  const caseQuery = useQuery({ queryKey: ["case", caseId], queryFn: () => api.getCase(caseId) });
+  const events = useQuery({ queryKey: ["events", caseId], queryFn: () => api.getEvents(caseId) });
+  const evidence = useQuery({ queryKey: ["evidence", caseId], queryFn: () => api.getEvidence(caseId) });
+  const approvals = useQuery({ queryKey: ["approvals"], queryFn: api.listApprovals });
+  const task = useMemo(() => (approvals.data ?? []).find((item) => item.case_id === caseId), [approvals.data, caseId]);
+  const runId = useMemo(() => {
+    const submitted = (events.data ?? []).find((event) => event.event_type === "CASE_SUBMITTED");
+    return typeof submitted?.payload.run_id === "string" ? submitted.payload.run_id : null;
+  }, [events.data]);
+  useEffect(() => {
+    if (!runId) return;
+    const controller = new AbortController();
+    api.subscribeRunEvents(runId, controller.signal, () => {
+      queryClient.invalidateQueries({ queryKey: ["events", caseId] });
+      queryClient.invalidateQueries({ queryKey: ["case", caseId] });
+      queryClient.invalidateQueries({ queryKey: ["evidence", caseId] });
+      queryClient.invalidateQueries({ queryKey: ["approvals"] });
+    }).catch((error) => {
+      if (!controller.signal.aborted) console.error("SSE connection failed", error);
+    });
+    return () => controller.abort();
+  }, [caseId, queryClient, runId]);
+  const decide = useMutation({
+    mutationFn: ({ task, decision }: { task: ApprovalTask; decision: "APPROVED" | "REJECTED" }) => api.decideApproval(task, decision, comment),
+    onSuccess: async () => {
+      setComment("");
+      setDecisionError("");
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["case", caseId] }),
+        queryClient.invalidateQueries({ queryKey: ["events", caseId] }),
+        queryClient.invalidateQueries({ queryKey: ["approvals"] }),
+      ]);
+    },
+    onError: (error) => setDecisionError(error.message),
+  });
 
-  const traceSteps = [
-    {
-      agent: 'Document Extraction',
-      status: 'success',
-      icon: FileText,
-      detail: "Extracted Vendor: Vendrai Technologies LLC. Tax ID: 98-7654321."
-    },
-    {
-      agent: 'Duplicate Detection',
-      status: 'warning',
-      icon: Copy,
-      detail: "Exact match found in ERP (ID: ERP-1001) based on Tax ID. Confidence: 100%."
-    },
-    {
-      agent: 'Risk Assessment',
-      status: 'danger',
-      icon: AlertTriangle,
-      detail: "Sanctions hit detected on vendor name. Risk Level set to HIGH."
-    },
-    {
-      agent: 'Policy Retrieval',
-      status: 'danger',
-      icon: ShieldAlert,
-      detail: "Violation of PROC-405. High-risk vendors require explicit CFO sign-off."
-    }
-  ];
+  if (caseQuery.isLoading) return <p className="p-12" aria-live="polite">Loading case…</p>;
+  if (caseQuery.isError || !caseQuery.data) return <p className="p-12 text-red-800" role="alert">Unable to load case: {caseQuery.error?.message}</p>;
+  const currentCase = caseQuery.data;
 
   return (
-    <div className="p-12 h-full flex flex-col">
-      <header className="mb-12 flex justify-between items-center">
-        <div className="flex items-center gap-6">
-          <Link href="/approvals">
-            <Button variant="icon" className="w-12 h-12">
-              <ArrowLeft className="w-5 h-5" />
-            </Button>
-          </Link>
+    <div className="min-h-full p-6 lg:p-12">
+      <header className="mb-10 flex flex-col justify-between gap-6 xl:flex-row xl:items-center">
+        <div className="flex items-center gap-4">
+          <Link href="/"><Button variant="icon" aria-label="Back to dashboard"><ArrowLeft className="h-5 w-5" /></Button></Link>
           <div>
-            <h2 className="font-display font-bold text-3xl mb-1">{caseId}</h2>
-            <p className="text-[var(--color-muted)]">Vendrai Technologies LLC • Submitted 2 mins ago</p>
+            <p className="text-xs font-bold text-[var(--color-muted)]">{currentCase.case_number}</p>
+            <h1 className="font-display text-3xl font-bold">{currentCase.title}</h1>
+            <p className="mt-1 text-sm text-[var(--color-muted)]">Version {currentCase.current_version} · Updated {new Date(currentCase.updated_at).toLocaleString()}</p>
           </div>
         </div>
-        
-        <div className="flex gap-4">
-          <Button variant="secondary" className="text-red-500 hover:text-red-600">Reject Vendor</Button>
-          <Button variant="primary">Override & Approve</Button>
-        </div>
+        <StatusChip status={currentCase.status} />
       </header>
 
-      <div className="flex-1 grid grid-cols-1 lg:grid-cols-3 gap-12">
-        {/* LangGraph Trace Timeline */}
-        <Card className="lg:col-span-2 p-12">
-          <h3 className="font-bold text-2xl mb-8 flex items-center gap-3">
-            <Bot className="w-6 h-6 text-[var(--color-accent)]" /> Agentic Audit Trace
-          </h3>
-          
-          <div className="space-y-8 relative before:absolute before:inset-0 before:ml-6 before:-translate-x-px md:before:mx-auto md:before:translate-x-0 before:h-full before:w-0.5 before:bg-gradient-to-b before:from-[var(--color-accent)] before:to-transparent">
-            
-            {traceSteps.map((step, index) => (
-              <motion.div 
-                key={index}
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: index * 0.2 }}
-                className="relative flex items-center justify-between md:justify-normal md:odd:flex-row-reverse group is-active"
-              >
-                <div className="flex items-center justify-center w-12 h-12 rounded-full border-4 border-[var(--color-clay)] bg-[var(--color-clay)] shadow-[var(--shadow-extruded)] text-slate-500 group-[.is-active]:text-[var(--color-accent)] shrink-0 md:order-1 md:group-odd:-translate-x-1/2 md:group-even:translate-x-1/2 z-10">
-                  <step.icon className="w-5 h-5" />
-                </div>
-                
-                <div className="w-[calc(100%-4rem)] md:w-[calc(50%-3rem)] p-6 rounded-2xl shadow-[var(--shadow-inset-sm)] bg-[var(--color-clay)]">
-                  <div className="flex items-center justify-between mb-2">
-                    <h4 className="font-bold text-lg">{step.agent}</h4>
-                    {step.status === 'success' && <CheckCircle2 className="w-5 h-5 text-[var(--color-success)]" />}
-                    {step.status === 'warning' && <AlertTriangle className="w-5 h-5 text-yellow-500" />}
-                    {step.status === 'danger' && <ShieldAlert className="w-5 h-5 text-red-500" />}
-                  </div>
-                  <p className="text-[var(--color-muted)] text-sm">{step.detail}</p>
-                </div>
-              </motion.div>
-            ))}
-
-          </div>
-        </Card>
-
-        {/* Extracted Data Panel */}
+      <div className="grid gap-8 xl:grid-cols-[1.25fr_1fr]">
         <div className="space-y-8">
-          <Card className="p-8">
-            <h3 className="font-bold text-xl mb-6">Extracted Metadata</h3>
-            
-            <div className="space-y-4">
-              <div className="bg-[var(--color-clay)] rounded-xl p-4 shadow-[var(--shadow-inset-sm)]">
-                <span className="text-xs font-bold text-[var(--color-muted)] uppercase tracking-wider block mb-1">Legal Name</span>
-                <span className="font-medium">Vendrai Technologies LLC</span>
-              </div>
-              <div className="bg-[var(--color-clay)] rounded-xl p-4 shadow-[var(--shadow-inset-sm)]">
-                <span className="text-xs font-bold text-[var(--color-muted)] uppercase tracking-wider block mb-1">Tax ID</span>
-                <span className="font-medium">98-7654321</span>
-              </div>
-              <div className="bg-[var(--color-clay)] rounded-xl p-4 shadow-[var(--shadow-inset-sm)]">
-                <span className="text-xs font-bold text-[var(--color-muted)] uppercase tracking-wider block mb-1">Address</span>
-                <span className="font-medium text-sm">123 Innovation Drive, Suite 400, San Francisco, CA 94105</span>
-              </div>
-            </div>
+          <Card>
+            <div className="mb-6 flex items-center gap-3"><FileSearch className="h-6 w-6 text-[var(--color-accent)]" /><h2 className="font-display text-xl font-bold">Observable workflow events</h2></div>
+            <ol className="space-y-5">
+              {(events.data ?? []).map((event) => (
+                <li key={event.event_id} className="grid grid-cols-[auto_1fr] gap-4">
+                  <div className="mt-1 h-3 w-3 rounded-full bg-[var(--color-accent)]" aria-hidden="true" />
+                  <div>
+                    <div className="flex flex-wrap items-center justify-between gap-2"><span className="font-bold">{event.event_type.replaceAll("_", " ")}</span><time className="text-xs text-[var(--color-muted)]">{new Date(event.created_at).toLocaleString()}</time></div>
+                    {Object.keys(event.payload).length > 0 && <pre className="mt-2 overflow-x-auto whitespace-pre-wrap rounded-xl bg-slate-900 p-3 text-xs text-slate-200">{JSON.stringify(event.payload, null, 2)}</pre>}
+                  </div>
+                </li>
+              ))}
+              {!events.isLoading && (events.data ?? []).length === 0 && <li className="text-sm text-[var(--color-muted)]">No workflow events have been recorded.</li>}
+            </ol>
           </Card>
-          
-          <Card className="p-8 border-2 border-red-500/20">
-            <h3 className="font-bold text-xl mb-4 text-red-500">Required Actions</h3>
-            <p className="text-sm text-[var(--color-muted)] mb-6">
-              The Policy Agent determined this case requires manual override due to a HIGH risk OFAC sanction match on the vendor name.
-            </p>
-            <div className="bg-red-500/10 rounded-xl p-4 border border-red-500/20 text-red-700 font-medium text-sm">
-              PROC-405: CFO and CCO Sign-off Required
+          <Card>
+            <div className="mb-6 flex items-center gap-3"><ShieldAlert className="h-6 w-6 text-[var(--color-accent)]" /><h2 className="font-display text-xl font-bold">Evidence and explanations</h2></div>
+            <div className="space-y-4">
+              {(evidence.data?.items ?? []).map((item) => (
+                <article key={item.evidence_item_id} className="rounded-2xl p-5 shadow-[var(--shadow-inset-sm)]">
+                  <div className="mb-2 flex flex-wrap items-center justify-between gap-2"><span className="rounded-full bg-slate-200 px-3 py-1 text-xs font-bold">{item.reason_code}</span>{item.confidence !== null && <span className="text-xs text-[var(--color-muted)]">Confidence {(item.confidence * 100).toFixed(0)}%</span>}</div>
+                  <p className="text-sm">{item.claim}</p>
+                  <p className="mt-2 text-xs text-[var(--color-muted)]">Source: {item.source_type}{item.source_id ? ` · ${item.source_id}` : ""}</p>
+                </article>
+              ))}
+              {!evidence.isLoading && (evidence.data?.items ?? []).length === 0 && <p className="text-sm text-[var(--color-muted)]">Evidence is not ready yet. The case will remain visibly blocked if a mandatory source is unavailable.</p>}
             </div>
           </Card>
         </div>
+
+        <aside className="space-y-8">
+          <Card>
+            <h2 className="font-display text-xl font-bold">Decision control</h2>
+            {task ? (
+              <>
+                <p className="mt-2 text-sm text-[var(--color-muted)]">Review the evidence before acting. This decision is bound to case version {task.case_version} and hash:</p>
+                <code className="mt-4 block break-all rounded-xl bg-slate-900 p-3 text-xs text-slate-200">{task.evidence_hash}</code>
+                <label htmlFor="decision-comment" className="mb-2 mt-5 block text-sm font-bold">Decision comment</label>
+                <textarea id="decision-comment" value={comment} onChange={(event) => setComment(event.target.value)} rows={4} className="w-full rounded-2xl bg-transparent p-4 shadow-[var(--shadow-inset)] outline-none focus:ring-2 focus:ring-[var(--color-accent)]" placeholder="Required when rejecting; recommended for approval" />
+                {decisionError && <p role="alert" className="mt-3 rounded-xl bg-red-50 p-3 text-sm text-red-900">{decisionError}</p>}
+                <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                  <Button type="button" variant="secondary" disabled={decide.isPending || !comment.trim()} onClick={() => decide.mutate({ task, decision: "REJECTED" })} className="gap-2 text-red-700 disabled:opacity-50"><XCircle className="h-4 w-4" />Reject</Button>
+                  <Button type="button" variant="primary" disabled={decide.isPending} onClick={() => decide.mutate({ task, decision: "APPROVED" })} className="gap-2 disabled:opacity-50"><CheckCircle2 className="h-4 w-4" />Approve</Button>
+                </div>
+              </>
+            ) : <p className="mt-3 text-sm text-[var(--color-muted)]">There is no pending approval task for this case.</p>}
+          </Card>
+          <Card>
+            <h2 className="font-bold">Safety semantics</h2>
+            <ul className="mt-3 list-disc space-y-2 pl-5 text-sm text-[var(--color-muted)]"><li>No private chain-of-thought is displayed.</li><li>Sanctions candidates cannot be cleared by an LLM.</li><li>A stale case version invalidates this decision.</li><li>ERP creation requires an approved evidence hash.</li></ul>
+          </Card>
+        </aside>
       </div>
     </div>
   );

@@ -1,76 +1,48 @@
 "use client";
 
-import React from 'react';
-import { Card } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { IconWell } from '@/components/ui/icon-well';
-import { FileText, Download, Calendar, Filter } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { useQuery } from "@tanstack/react-query";
+import { Download, FileJson2, Sheet } from "lucide-react";
+import { api } from "@/lib/api";
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+
+function download(name: string, content: string, type: string) {
+  const url = URL.createObjectURL(new Blob([content], { type }));
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = name;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
 
 export default function ReportsPage() {
-  const reports = [
-    { name: "Monthly Compliance Audit", date: "Oct 1, 2026", type: "PDF", size: "2.4 MB" },
-    { name: "Vendor Risk Assessment (Q3)", date: "Sep 28, 2026", type: "CSV", size: "845 KB" },
-    { name: "Invoice Exceptions Log", date: "Sep 25, 2026", type: "Excel", size: "1.2 MB" },
-    { name: "Agent Trace History", date: "Sep 20, 2026", type: "JSON", size: "4.8 MB" },
-  ];
-
+  const cases = useQuery({ queryKey: ["cases"], queryFn: api.listCases });
+  const rows = cases.data?.items ?? [];
+  const exportJson = () => download(`neurox-cases-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(rows, null, 2), "application/json");
+  const exportCsv = () => {
+    const escape = (value: unknown) => `"${String(value).replaceAll('"', '""')}"`;
+    const header = ["case_number", "title", "status", "priority", "current_version", "created_at", "updated_at"];
+    const csv = [header.join(","), ...rows.map((item) => header.map((key) => escape(item[key as keyof typeof item])).join(","))].join("\n");
+    download(`neurox-cases-${new Date().toISOString().slice(0, 10)}.csv`, csv, "text/csv;charset=utf-8");
+  };
   return (
-    <div className="p-12 h-full flex flex-col">
-      <header className="mb-12 flex justify-between items-end">
-        <div>
-          <h2 className="font-display font-bold text-3xl mb-2">Export Reports</h2>
-          <p className="text-[var(--color-muted)]">Download historical agent data and compliance logs.</p>
-        </div>
-        
-        <div className="flex gap-4">
-          <Button variant="secondary" className="gap-2">
-            <Filter className="w-4 h-4" /> Filter
-          </Button>
-          <Button variant="secondary" className="gap-2">
-            <Calendar className="w-4 h-4" /> Date Range
-          </Button>
-        </div>
-      </header>
-
-      <Card className="flex-1 overflow-hidden flex flex-col p-8">
-        <div className="grid grid-cols-12 gap-4 pb-4 border-b border-[rgba(255,255,255,0.1)] text-sm font-bold text-[var(--color-muted)] px-4">
-          <div className="col-span-6">Report Name</div>
-          <div className="col-span-2">Date Generated</div>
-          <div className="col-span-2">Format</div>
-          <div className="col-span-2 text-right">Action</div>
-        </div>
-        
-        <div className="flex-1 overflow-y-auto space-y-2 mt-4 pr-2">
-          {reports.map((report, i) => (
-            <motion.div
-              key={i}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: i * 0.1 }}
-              className="grid grid-cols-12 gap-4 items-center p-4 rounded-xl hover:bg-[var(--color-clay)] hover:shadow-[var(--shadow-inset-sm)] transition-all group"
-            >
-              <div className="col-span-6 flex items-center gap-4">
-                <IconWell className="shrink-0 bg-transparent shadow-none border border-[rgba(255,255,255,0.2)] group-hover:border-[var(--color-accent)] transition-colors">
-                  <FileText className="w-5 h-5 text-[var(--color-primary)] group-hover:text-[var(--color-accent)]" />
-                </IconWell>
-                <span className="font-bold">{report.name}</span>
-              </div>
-              <div className="col-span-2 text-sm text-[var(--color-muted)]">{report.date}</div>
-              <div className="col-span-2">
-                <span className="text-xs font-bold px-3 py-1 bg-[rgba(255,255,255,0.05)] rounded-full border border-[rgba(255,255,255,0.1)]">
-                  {report.type}
-                </span>
-              </div>
-              <div className="col-span-2 flex justify-end">
-                <button className="w-10 h-10 flex items-center justify-center rounded-full bg-[var(--color-bg)] shadow-[var(--shadow-extruded-sm)] hover:bg-[var(--color-accent)] transition-all group/btn border border-[rgba(255,255,255,0.3)]">
-                  <Download className="w-5 h-5 text-[var(--color-primary)] group-hover/btn:text-white" strokeWidth={2} />
-                </button>
-              </div>
-            </motion.div>
-          ))}
-        </div>
-      </Card>
+    <div className="min-h-full p-6 lg:p-12">
+      <header className="mb-10"><p className="mb-2 text-sm font-bold uppercase tracking-[0.2em] text-[var(--color-accent)]">Controlled export</p><h1 className="font-display text-3xl font-bold">Operational reports</h1><p className="mt-2 text-[var(--color-muted)]">Exports contain only the case summary fields currently authorized in this view.</p></header>
+      {cases.isError && <p role="alert" className="mb-6 rounded-xl bg-red-50 p-4 text-red-900">Unable to prepare reports: {cases.error.message}</p>}
+      <div className="grid max-w-4xl gap-8 md:grid-cols-2">
+        <Card>
+          <Sheet className="mb-5 h-8 w-8 text-emerald-700" />
+          <h2 className="font-display text-xl font-bold">Case register (CSV)</h2>
+          <p className="my-4 text-sm text-[var(--color-muted)]">A spreadsheet-ready register of {rows.length} current supplier cases. Sensitive extracted fields and documents are excluded.</p>
+          <Button type="button" variant="primary" className="gap-2" disabled={cases.isLoading} onClick={exportCsv}><Download className="h-4 w-4" />Download CSV</Button>
+        </Card>
+        <Card>
+          <FileJson2 className="mb-5 h-8 w-8 text-[var(--color-accent)]" />
+          <h2 className="font-display text-xl font-bold">Case register (JSON)</h2>
+          <p className="my-4 text-sm text-[var(--color-muted)]">Machine-readable case summaries for controlled downstream analysis. Audit chains require the dedicated auditor API.</p>
+          <Button type="button" variant="primary" className="gap-2" disabled={cases.isLoading} onClick={exportJson}><Download className="h-4 w-4" />Download JSON</Button>
+        </Card>
+      </div>
     </div>
   );
 }

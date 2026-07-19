@@ -1,160 +1,52 @@
 "use client";
 
-import React from 'react';
-import { Card } from '@/components/ui/card';
-import { IconWell } from '@/components/ui/icon-well';
-import { Activity, Clock, ShieldCheck, Zap } from 'lucide-react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, PieChart, Pie, Cell, Legend } from 'recharts';
-import { motion } from 'framer-motion';
+import { useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { AlertTriangle, CheckCircle2, Clock3, Layers3 } from "lucide-react";
+import { api, type CaseStatus } from "@/lib/api";
+import { Card } from "@/components/ui/card";
 
-const processingTimeData = [
-  { name: 'Mon', minutes: 12 },
-  { name: 'Tue', minutes: 10 },
-  { name: 'Wed', minutes: 15 },
-  { name: 'Thu', minutes: 8 },
-  { name: 'Fri', minutes: 9 },
-];
+export default function AnalyticsPage() {
+  const cases = useQuery({ queryKey: ["cases"], queryFn: api.listCases });
+  const metrics = useMemo(() => {
+    const items = cases.data?.items ?? [];
+    const counts = items.reduce<Record<string, number>>((acc, item) => ({ ...acc, [item.status]: (acc[item.status] ?? 0) + 1 }), {});
+    const complete = items.filter((item) => item.status === "COMPLETED");
+    const averageHours = complete.length
+      ? complete.reduce((sum, item) => sum + (new Date(item.updated_at).getTime() - new Date(item.created_at).getTime()) / 3_600_000, 0) / complete.length
+      : null;
+    return { items, counts, complete, averageHours };
+  }, [cases.data]);
 
-const ocrAccuracyData = [
-  { name: 'Mon', accuracy: 92 },
-  { name: 'Tue', accuracy: 95 },
-  { name: 'Wed', accuracy: 89 },
-  { name: 'Thu', accuracy: 98 },
-  { name: 'Fri', accuracy: 96 },
-];
-
-export default function AnalyticsDashboard() {
   return (
-    <div className="p-12 h-full flex flex-col">
-      <header className="mb-12">
-        <h2 className="font-display font-bold text-3xl mb-2">Agentic Performance Metrics</h2>
-        <p className="text-[var(--color-muted)]">Enterprise-level KPIs for the Vendor-to-Pay pipeline.</p>
-      </header>
-
-      {/* KPI Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8 mb-12">
+    <div className="min-h-full p-6 lg:p-12">
+      <header className="mb-10"><p className="mb-2 text-sm font-bold uppercase tracking-[0.2em] text-[var(--color-accent)]">Event-derived reporting</p><h1 className="font-display text-3xl font-bold">Operational analytics</h1><p className="mt-2 text-[var(--color-muted)]">Metrics are computed from live case records. No invented OCR accuracy or autonomous-action counts.</p></header>
+      {cases.isError && <p role="alert" className="mb-6 rounded-xl bg-red-50 p-4 text-red-900">Unable to load analytics: {cases.error.message}</p>}
+      <section className="grid gap-6 sm:grid-cols-2 xl:grid-cols-4">
         {[
-          { label: 'Avg Resolution Time', value: '11.2m', icon: Clock, desc: '-45% from manual', color: 'text-blue-500', bg: 'bg-blue-500/10' },
-          { label: 'OCR Confidence', value: '94.5%', icon: ShieldCheck, desc: 'Target: >90%', color: 'text-green-500', bg: 'bg-green-500/10' },
-          { label: 'Autonomous Actions', value: '1,248', icon: Zap, desc: 'This week', color: 'text-yellow-500', bg: 'bg-yellow-500/10' },
-          { label: 'Duplicate Hits', value: '142', icon: Activity, desc: 'Avoided ERP mess', color: 'text-purple-500', bg: 'bg-purple-500/10' },
-        ].map((kpi, i) => (
-          <motion.div
-            key={i}
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: i * 0.1 }}
-          >
-            <Card className="p-6 h-full flex flex-col justify-center relative overflow-hidden group">
-              <div className={`absolute top-4 right-4 p-3 rounded-xl ${kpi.bg} transition-transform group-hover:scale-110`}>
-                <kpi.icon className={`w-8 h-8 ${kpi.color}`} />
-              </div>
-              <p className="text-sm font-bold text-[var(--color-muted)] uppercase tracking-wider mb-2 relative z-10">{kpi.label}</p>
-              <p className="font-display font-extrabold text-4xl mb-2 relative z-10">{kpi.value}</p>
-              <p className="text-sm text-[var(--color-success)] relative z-10">{kpi.desc}</p>
-            </Card>
-          </motion.div>
-        ))}
-      </div>
-
-      {/* Charts Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-12 flex-1 min-h-[400px]">
-        {/* Exceptions Breakdown (Donut Chart) */}
-        <Card className="p-8 flex flex-col relative">
-          <div className="mb-6">
-            <h3 className="font-bold text-xl mb-1">Exceptions Breakdown</h3>
-            <p className="text-xs text-[var(--color-muted)]">Identifies systemic procurement issues</p>
-          </div>
-          <div className="flex-1 bg-[var(--color-clay)] rounded-2xl shadow-[var(--shadow-inset-sm)] p-4 flex items-center justify-center relative">
-            
-            {/* Center Label for Donut Hole */}
-            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none pb-8">
-              <span className="text-3xl font-display font-extrabold text-[var(--color-primary)]">100</span>
-              <span className="text-xs font-bold text-[var(--color-muted)] uppercase tracking-wider">Total</span>
-            </div>
-
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={[
-                    { name: 'Price Variance', value: 45, color: '#3b82f6' },
-                    { name: 'Missing PO', value: 25, color: '#eab308' },
-                    { name: 'Policy Violation', value: 20, color: '#a855f7' },
-                    { name: 'Sanctions Risk', value: 10, color: '#ef4444' },
-                  ]}
-                  innerRadius={110}
-                  outerRadius={140}
-                  paddingAngle={5}
-                  dataKey="value"
-                  stroke="none"
-                >
-                  {
-                    [
-                      { name: 'Price Variance', value: 45, color: '#3b82f6' },
-                      { name: 'Missing PO', value: 25, color: '#eab308' },
-                      { name: 'Policy Violation', value: 20, color: '#a855f7' },
-                      { name: 'Sanctions Risk', value: 10, color: '#ef4444' },
-                    ].map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
-                    ))
-                  }
-                </Pie>
-                <Tooltip 
-                  contentStyle={{ backgroundColor: 'var(--color-clay)', borderRadius: '12px', border: 'none', boxShadow: '5px 5px 10px rgba(163, 177, 198, 0.6), -5px -5px 10px rgba(255, 255, 255, 0.5)' }}
-                  itemStyle={{ color: 'var(--color-primary)', fontWeight: 'bold' }}
-                />
-                <Legend 
-                  verticalAlign="bottom" 
-                  height={36} 
-                  iconType="circle"
-                  wrapperStyle={{ fontSize: '12px', color: 'var(--color-muted)', fontWeight: '600', paddingTop: '20px' }}
-                />
-              </PieChart>
-            </ResponsiveContainer>
+          { label: "Total cases", value: metrics.items.length, icon: Layers3, note: "All supplier-onboarding cases" },
+          { label: "Completed", value: metrics.complete.length, icon: CheckCircle2, note: "ERP-confirmed completion" },
+          { label: "Pending review", value: metrics.counts.APPROVAL_PENDING ?? 0, icon: Clock3, note: "Human decisions outstanding" },
+          { label: "Attention states", value: metrics.items.filter((item) => ["FAILED", "ERP_SYNC_FAILED", "VERIFICATION_FAILED", "RISK_REVIEW"].includes(item.status)).length, icon: AlertTriangle, note: "Visible recovery required" },
+        ].map((item) => <Card key={item.label} className="p-6"><item.icon className="mb-4 h-6 w-6 text-[var(--color-accent)]" /><p className="text-sm font-bold text-[var(--color-muted)]">{item.label}</p><p className="my-1 text-4xl font-extrabold">{item.value}</p><p className="text-xs text-[var(--color-muted)]">{item.note}</p></Card>)}
+      </section>
+      <section className="mt-8 grid gap-8 xl:grid-cols-[1.4fr_1fr]">
+        <Card>
+          <h2 className="mb-6 font-display text-xl font-bold">Pipeline distribution</h2>
+          <div className="space-y-4">
+            {(Object.entries(metrics.counts) as [CaseStatus, number][]).sort((a, b) => b[1] - a[1]).map(([status, count]) => {
+              const percent = metrics.items.length ? Math.round(count / metrics.items.length * 100) : 0;
+              return <div key={status}><div className="mb-1 flex justify-between text-sm"><span className="font-bold">{status.replaceAll("_", " ")}</span><span>{count} · {percent}%</span></div><div className="h-3 rounded-full shadow-[var(--shadow-inset-sm)]"><div className="h-3 rounded-full bg-[var(--color-accent)]" style={{ width: `${percent}%` }} /></div></div>;
+            })}
+            {!cases.isLoading && metrics.items.length === 0 && <p className="text-sm text-[var(--color-muted)]">No case data is available yet.</p>}
           </div>
         </Card>
-
-        <div className="lg:col-span-2 space-y-12 flex flex-col">
-          {/* Existing Processing Time Chart */}
-          <Card className="p-8 flex flex-col flex-1">
-            <h3 className="font-bold text-xl mb-6">Processing Time (Minutes)</h3>
-            <div className="flex-1 bg-[var(--color-clay)] rounded-2xl shadow-[var(--shadow-inset-sm)] p-4">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={processingTimeData} margin={{ top: 20, right: 30, left: -20, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(0,0,0,0.05)" />
-                  <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: 'var(--color-muted)', fontSize: 12}} dy={10} />
-                  <YAxis axisLine={false} tickLine={false} tick={{fill: 'var(--color-muted)', fontSize: 12}} />
-                  <Tooltip 
-                    cursor={{fill: 'rgba(108,99,255,0.05)'}}
-                    contentStyle={{ backgroundColor: 'var(--color-clay)', borderRadius: '12px', border: 'none', boxShadow: '5px 5px 10px rgba(163, 177, 198, 0.6), -5px -5px 10px rgba(255, 255, 255, 0.5)' }}
-                    itemStyle={{ color: 'var(--color-primary)', fontWeight: 'bold' }}
-                  />
-                  <Bar dataKey="minutes" fill="var(--color-accent)" radius={[6, 6, 0, 0]} barSize={40} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </Card>
-
-          {/* Agent Extraction Accuracy Chart */}
-          <Card className="p-8 flex flex-col flex-1">
-            <h3 className="font-bold text-xl mb-6">Agent Extraction Accuracy (%)</h3>
-            <div className="flex-1 bg-[var(--color-clay)] rounded-2xl shadow-[var(--shadow-inset-sm)] p-4">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={ocrAccuracyData} margin={{ top: 20, right: 30, left: -20, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(0,0,0,0.05)" />
-                  <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: 'var(--color-muted)', fontSize: 12}} dy={10} />
-                  <YAxis domain={[80, 100]} axisLine={false} tickLine={false} tick={{fill: 'var(--color-muted)', fontSize: 12}} />
-                  <Tooltip 
-                    contentStyle={{ backgroundColor: 'var(--color-clay)', borderRadius: '12px', border: 'none', boxShadow: '5px 5px 10px rgba(163, 177, 198, 0.6), -5px -5px 10px rgba(255, 255, 255, 0.5)' }}
-                    itemStyle={{ color: 'var(--color-success)', fontWeight: 'bold' }}
-                  />
-                  <Line type="monotone" dataKey="accuracy" stroke="var(--color-success)" strokeWidth={4} dot={{ fill: 'var(--color-success)', strokeWidth: 2, r: 4 }} activeDot={{ r: 8 }} />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-          </Card>
-        </div>
-      </div>
+        <Card>
+          <h2 className="font-display text-xl font-bold">Resolution time</h2>
+          <p className="mt-8 text-5xl font-extrabold">{metrics.averageHours === null ? "—" : `${metrics.averageHours.toFixed(1)}h`}</p>
+          <p className="mt-2 text-sm text-[var(--color-muted)]">Average elapsed time for ERP-confirmed cases. This value stays unavailable until real completions exist.</p>
+        </Card>
+      </section>
     </div>
   );
 }
