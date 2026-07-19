@@ -1,23 +1,18 @@
-from typing import TypedDict, Annotated, Sequence, Optional, Dict, Any
-from langchain_core.messages import BaseMessage
+from typing import Annotated, Any, TypedDict
 import operator
 
-class AgentState(TypedDict):
-    # Core case context
+
+class AgentState(TypedDict, total=False):
     case_id: str
+    run_id: str
     tenant_id: str
-    case_type: str
-    
-    # LangGraph message history
-    messages: Annotated[Sequence[BaseMessage], operator.add]
-    
-    # Shared global state context for the agents
-    current_vendor: Optional[Dict[str, Any]]
-    duplicate_status: Optional[str]
-    risk_level: Optional[str]
-    policy_status: Optional[str]
-    missing_information: Optional[list[str]]
-    approval_status: Optional[str]
-    
-    # Next node routing
-    next_node: str
+    case_version: int
+    current_node: str
+    extracted_vendor: dict[str, Any]
+    duplicate_result: dict[str, Any]
+    risk_result: dict[str, Any]
+    policy_result: dict[str, Any]
+    evidence_packet: dict[str, Any]
+    verification: dict[str, Any]
+    approval_decision: dict[str, Any]
+    events: Annotated[list[dict[str, Any]], operator.add]

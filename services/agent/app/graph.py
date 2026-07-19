@@ -1,376 +1,161 @@
-import os
-from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langgraph.graph import StateGraph, END
-from pydantic import BaseModel, Field
+import asyncio
+from dataclasses import dataclass
+from typing import Any, Literal
 
-from app.config import settings
-from app.state import AgentState
-from app.schemas import SupplierDocumentFields, DuplicateDecision, RiskAssessment, PolicyEvaluation
-from app.tools.ocr import extract_text_from_document
-from app.tools.duplicate import search_vendor_duplicates
-from app.tools.risk import check_vendor_risk
-from app.tools.policy import search_procurement_policies
+from langgraph.graph import END, StateGraph
 
-# Setup Gemini Model
-if not settings.GEMINI_API_KEY:
-    # Dummy mock model if no API key is provided
-    # In a real environment, you must provide GEMINI_API_KEY in .env
-    pass
-
-class Route(BaseModel):
-    next_node: str = Field(description="The next agent to route to: 'document_extraction_agent', 'duplicate_detection_agent', 'risk_agent', 'policy_agent', or 'END'")
-    reasoning: str = Field(description="Why this route was chosen based on the current case state")
-
-def supervisor_node(state: AgentState) -> dict:
-    print(f"--- SUPERVISOR NODE --- Case: {state.get('case_id')}")
-    
-    # If we don't have a Gemini API key yet, just route to END safely for testing
-    if not settings.GEMINI_API_KEY:
-        print("WARNING: No GEMINI_API_KEY found. Routing to END.")
-        return {"next_node": "END"}
-        
-    llm = ChatGoogleGenerativeAI(
-        model=settings.DEFAULT_MODEL,
-        google_api_key=settings.GEMINI_API_KEY,
-        temperature=0.1
-    )
-    
-    # In LangGraph 0.1.5, we can use bind_tools or structured output.
-    # We will use with_structured_output for strict routing.
-    router_llm = llm.with_structured_output(Route)
-    
-    system_prompt = (
-        "You are the Supervisor Agent for the Vendor-to-Pay Exception System. "
-        "Your job is to route to the correct specialist agent based on the CURRENT STATE.\n\n"
-        f"CURRENT STATE:\n"
-        f"- Vendor Extracted: {'YES' if state.get('current_vendor') else 'NO'}\n"
-        f"- Duplicate Checked: {'YES' if state.get('duplicate_status') else 'NO'}\n"
-        f"- Risk Checked: {'YES' if state.get('risk_level') else 'NO'}\n"
-        f"- Policy Checked: {'YES' if state.get('policy_status') else 'NO'}\n\n"
-        "ROUTING RULES:\n"
-        "1. If Vendor Extracted is NO, route to 'document_extraction_agent'.\n"
-        "2. If Vendor Extracted is YES but Duplicate Checked is NO, route to 'duplicate_detection_agent'.\n"
-        "3. If Duplicate Checked is YES but Risk Checked is NO, route to 'risk_agent'.\n"
-        "4. If Risk Checked is YES but Policy Checked is NO, route to 'policy_agent'.\n"
-        "5. If all are YES, route to 'END'."
-    )
-    
-    messages = [SystemMessage(content=system_prompt)] + list(state.get("messages", []))
-    
-    try:
-        response = router_llm.invoke(messages)
-        if isinstance(response, list):
-            response = response[0]
-            
-        if isinstance(response, dict):
-            next_node = response.get("next_node", "END")
-            reasoning = response.get("reasoning", "No reasoning provided")
-        else:
-            next_node = getattr(response, "next_node", "END")
-            reasoning = getattr(response, "reasoning", "No reasoning provided")
-            
-        print(f"Routing Decision: {next_node} - Reason: {reasoning}")
-        return {"next_node": next_node}
-    except Exception as e:
-        print(f"Error in Supervisor: {e}")
-        return {"next_node": "END"}
-
-def document_extraction_node(state: AgentState) -> dict:
-    print(f"--- DOCUMENT EXTRACTION AGENT --- Case: {state.get('case_id')}")
-    
-    if not settings.GEMINI_API_KEY:
-        print("WARNING: No GEMINI_API_KEY found. Returning stub data.")
-        return {
-            "messages": [SystemMessage(content="Extracted data from documents successfully (STUB).")],
-            "current_vendor": {"vendor_name": "Extracted Vendor Inc.", "tax_id": "12345"}
-        }
-        
-    try:
-        # Step 1: Call OCR tool
-        ocr_text = extract_text_from_document() # Using simulation mode by default for MVP unless URL is passed
-        print("OCR Text Extracted successfully.")
-        
-        # Step 2: Extract structured data using LLM
-        llm = ChatGoogleGenerativeAI(
-            model=settings.DEFAULT_MODEL,
-            google_api_key=settings.GEMINI_API_KEY,
-            temperature=0.0
-        )
-        extraction_llm = llm.with_structured_output(SupplierDocumentFields)
-        
-        prompt = (
-            "Extract the following supplier details from the OCR text provided below. "
-            "If a field is not present, leave it null/None.\n\n"
-            f"OCR TEXT:\n{ocr_text}"
-        )
-        
-        extracted_data = extraction_llm.invoke(prompt)
-        
-        # Handle response format
-        if isinstance(extracted_data, list):
-            extracted_data = extracted_data[0]
-            
-        if isinstance(extracted_data, BaseModel):
-            vendor_dict = extracted_data.model_dump()
-        elif isinstance(extracted_data, dict):
-            vendor_dict = extracted_data
-        else:
-            vendor_dict = getattr(extracted_data, "dict", lambda: {})()
-            
-        print(f"Extracted Vendor Data: {vendor_dict}")
-        
-        return {
-            "messages": [SystemMessage(content=f"Document Extraction Complete. Found vendor: {vendor_dict.get('vendor_name', 'Unknown')}")],
-            "current_vendor": vendor_dict
-        }
-        
-    except Exception as e:
-        print(f"Error in Document Extraction: {e}")
-        return {
-            "messages": [SystemMessage(content=f"Document Extraction failed: {str(e)}")]
-        }
-
-def duplicate_detection_node(state: AgentState) -> dict:
-    print(f"--- DUPLICATE DETECTION AGENT --- Case: {state.get('case_id')}")
-    
-    vendor = state.get("current_vendor")
-    if not vendor:
-        return {"duplicate_status": "SKIPPED", "messages": [SystemMessage(content="No vendor data to check duplicates for.")]}
-        
-    vendor_name = vendor.get("vendor_name", "")
-    tax_id = vendor.get("tax_id")
-    
-    # Step 1: Query potential duplicates
-    print(f"Searching ERP for duplicates for: {vendor_name}")
-    potential_matches = search_vendor_duplicates(vendor_name, tax_id)
-    
-    if not potential_matches:
-        print("No potential duplicates found.")
-        return {
-            "duplicate_status": "NO_DUPLICATES",
-            "messages": [SystemMessage(content="Duplicate check complete. No matching ERP vendors found.")]
-        }
-        
-    if not settings.GEMINI_API_KEY:
-        print("WARNING: No GEMINI API Key, returning stub duplicate check.")
-        return {"duplicate_status": "POTENTIAL_DUPLICATE_FOUND"}
-
-    # Step 2: Use LLM to reason about the matches
-    llm = ChatGoogleGenerativeAI(
-        model=settings.DEFAULT_MODEL,
-        google_api_key=settings.GEMINI_API_KEY,
-        temperature=0.1
-    )
-    duplicate_llm = llm.with_structured_output(DuplicateDecision)
-    
-    prompt = (
-        "You are a master data governance agent. We extracted a vendor from a document and searched our ERP system for similar vendors.\n"
-        "Your job is to look at the newly extracted vendor and the potential ERP matches, and determine if this is likely a DUPLICATE.\n\n"
-        f"EXTRACTED VENDOR:\nName: {vendor_name}\nTax ID: {tax_id}\n\n"
-        f"POTENTIAL ERP MATCHES:\n{potential_matches}\n\n"
-        "If a match is extremely likely (e.g. same tax id, or very similar name), mark it as a duplicate."
-    )
-    
-    try:
-        decision = duplicate_llm.invoke(prompt)
-        
-        if isinstance(decision, list):
-            decision = decision[0]
-            
-        if isinstance(decision, BaseModel):
-            decision_dict = decision.model_dump()
-        elif isinstance(decision, dict):
-            decision_dict = decision
-        else:
-            decision_dict = getattr(decision, "dict", lambda: {})()
-            
-        print(f"Duplicate Decision: {decision_dict}")
-        
-        is_dup = decision_dict.get("is_duplicate", False)
-        status = "DUPLICATE_FOUND" if is_dup else "NO_DUPLICATES"
-        
-        return {
-            "duplicate_status": status,
-            "messages": [SystemMessage(content=f"Duplicate Check Complete. Decision: {status}. Reasoning: {decision_dict.get('reasoning')}")]
-        }
-        
-    except Exception as e:
-        print(f"Error in Duplicate Detection: {e}")
-        return {"duplicate_status": "ERROR"}
-
-
-def risk_assessment_node(state: AgentState) -> dict:
-    print(f"--- RISK ASSESSMENT AGENT --- Case: {state.get('case_id')}")
-    
-    vendor = state.get("current_vendor")
-    if not vendor:
-        return {"risk_level": "UNKNOWN", "messages": [SystemMessage(content="No vendor data to perform risk check on.")]}
-        
-    vendor_name = vendor.get("vendor_name", "")
-    address = vendor.get("address", "")
-    
-    # Step 1: Call mock compliance tool
-    print(f"Checking OFAC and Sanctions for: {vendor_name}")
-    raw_risk_data = check_vendor_risk(vendor_name, address)
-    
-    if not settings.GEMINI_API_KEY:
-        print("WARNING: No GEMINI API Key, returning stub risk check.")
-        return {"risk_level": "LOW"}
-        
-    # Step 2: Use LLM to analyze the risk factors and determine final level
-    llm = ChatGoogleGenerativeAI(
-        model=settings.DEFAULT_MODEL,
-        google_api_key=settings.GEMINI_API_KEY,
-        temperature=0.1
-    )
-    risk_llm = llm.with_structured_output(RiskAssessment)
-    
-    prompt = (
-        "You are a Senior Compliance Officer for a Global Enterprise.\n"
-        "Review the following vendor details and the raw compliance/sanctions check results.\n"
-        "Determine the final risk level (LOW, MEDIUM, HIGH).\n\n"
-        f"VENDOR DETAILS:\nName: {vendor_name}\nAddress: {address}\n\n"
-        f"COMPLIANCE CHECK RESULTS:\n{raw_risk_data}\n\n"
-        "Rules:\n"
-        "- If there are any direct sanctions hits or high-risk countries, risk MUST be HIGH.\n"
-        "- If there are minor flags (e.g. shell company), risk is MEDIUM.\n"
-        "- If no risk factors are identified, risk is LOW."
-    )
-    
-    try:
-        assessment = risk_llm.invoke(prompt)
-        
-        if isinstance(assessment, list):
-            assessment = assessment[0]
-            
-        if isinstance(assessment, BaseModel):
-            assessment_dict = assessment.model_dump()
-        elif isinstance(assessment, dict):
-            assessment_dict = assessment
-        else:
-            assessment_dict = getattr(assessment, "dict", lambda: {})()
-            
-        risk_level = assessment_dict.get("risk_level", "UNKNOWN")
-        print(f"Risk Assessment Complete: {risk_level}")
-        
-        return {
-            "risk_level": risk_level,
-            "messages": [SystemMessage(content=f"Risk Assessment Complete. Level: {risk_level}. Reasoning: {assessment_dict.get('reasoning')}")]
-        }
-        
-    except Exception as e:
-        print(f"Error in Risk Assessment: {e}")
-        return {"risk_level": "ERROR"}
-
-def policy_retrieval_node(state: AgentState) -> dict:
-    print(f"--- POLICY RETRIEVAL AGENT --- Case: {state.get('case_id')}")
-    
-    vendor = state.get("current_vendor")
-    risk_level = state.get("risk_level", "UNKNOWN")
-    
-    if not vendor:
-        return {"policy_status": "SKIPPED", "messages": [SystemMessage(content="No vendor data for policy check.")]}
-        
-    vendor_name = vendor.get("vendor_name", "")
-    
-    # Step 1: Query Mock Qdrant DB for policies
-    print(f"Searching Qdrant vector DB for policies applicable to: {vendor_name} (Risk: {risk_level})")
-    retrieved_policies = search_procurement_policies(vendor_name, risk_level)
-    
-    if not settings.GEMINI_API_KEY:
-        print("WARNING: No GEMINI API Key, returning stub policy check.")
-        return {"policy_status": "PASS"}
-        
-    # Step 2: LLM evaluates adherence
-    llm = ChatGoogleGenerativeAI(
-        model=settings.DEFAULT_MODEL,
-        google_api_key=settings.GEMINI_API_KEY,
-        temperature=0.1
-    )
-    policy_llm = llm.with_structured_output(PolicyEvaluation)
-    
-    prompt = (
-        "You are an AI Procurement Policy Enforcer. We have extracted vendor details, assessed their risk, "
-        "and retrieved the relevant corporate procurement policies from our vector database.\n"
-        "Your job is to evaluate if this vendor onboarding request complies with the retrieved policies, or if it requires manual review.\n\n"
-        f"VENDOR DETAILS:\nName: {vendor_name}\nRisk Level: {risk_level}\n\n"
-        f"RETRIEVED POLICIES:\n" + "\n".join(retrieved_policies) + "\n\n"
-        "Determine the policy adherence (PASS, FAIL, REQUIRES_REVIEW)."
-    )
-    
-    try:
-        evaluation = policy_llm.invoke(prompt)
-        
-        if isinstance(evaluation, list):
-            evaluation = evaluation[0]
-            
-        if isinstance(evaluation, BaseModel):
-            eval_dict = evaluation.model_dump()
-        elif isinstance(evaluation, dict):
-            eval_dict = evaluation
-        else:
-            eval_dict = getattr(evaluation, "dict", lambda: {})()
-            
-        adherence = eval_dict.get("policy_adherence", "UNKNOWN")
-        print(f"Policy Evaluation Complete: {adherence}")
-        
-        return {
-            "policy_status": adherence,
-            "messages": [SystemMessage(content=f"Policy Check Complete. Status: {adherence}. Flags: {eval_dict.get('policy_flags')}. Reasoning: {eval_dict.get('reasoning')}")]
-        }
-        
-    except Exception as e:
-        print(f"Error in Policy Retrieval: {e}")
-        return {"policy_status": "ERROR"}
-
-
-# Build Graph
-builder = StateGraph(AgentState)
-
-builder.add_node("supervisor", supervisor_node)
-builder.add_node("document_extraction_agent", document_extraction_node)
-builder.add_node("duplicate_detection_agent", duplicate_detection_node)
-builder.add_node("risk_agent", risk_assessment_node)
-builder.add_node("policy_agent", policy_retrieval_node)
-
-# The supervisor determines the next step
-builder.set_entry_point("supervisor")
-
-# Define conditional edges from supervisor
-builder.add_conditional_edges(
-    "supervisor",
-    lambda state: state["next_node"],
-    {
-        "document_extraction_agent": "document_extraction_agent",
-        "duplicate_detection_agent": "duplicate_detection_agent",
-        "risk_agent": "risk_agent",
-        "policy_agent": "policy_agent",
-        "END": END
-    }
+from app.schemas import (
+    EvidencePacket,
+    EvidenceRef,
+    ExtractedVendor,
+    PolicyClause,
+    RiskAssessment,
+    SanctionsEntity,
+    VendorRecord,
+    VerificationResult,
 )
+from app.state import AgentState
+from app.tools.duplicate import find_duplicates
+from app.tools.policy import retrieve_policies
+from app.tools.risk import screen_sanctions
 
-# Agents always route back to supervisor to decide what's next
-builder.add_edge("document_extraction_agent", "supervisor")
-builder.add_edge("duplicate_detection_agent", "supervisor")
-builder.add_edge("risk_agent", "supervisor")
-builder.add_edge("policy_agent", "supervisor")
 
-graph = builder.compile()
+@dataclass(frozen=True)
+class InvestigationContext:
+    vendors: list[VendorRecord]
+    sanctions_entities: list[SanctionsEntity]
+    policies: list[PolicyClause]
 
-if __name__ == "__main__":
-    print("Initializing Vendor-to-Pay Graph Test...")
-    initial_state = {
-        "case_id": "test-case-123",
-        "tenant_id": "tenant-abc",
-        "case_type": "VENDOR_ONBOARDING",
-        "messages": [HumanMessage(content="A new vendor just submitted a W-9 form and bank details. Please process.")],
-        "current_vendor": None,
-        "duplicate_status": None,
-        "risk_level": None,
-        "policy_status": None
+
+def _event(event_type: str, **payload: Any) -> dict[str, Any]:
+    return {"type": event_type, "payload": payload}
+
+
+def specialist_node(context: InvestigationContext):
+    async def run(state: AgentState) -> dict[str, Any]:
+        vendor = ExtractedVendor.model_validate(state["extracted_vendor"])
+        case_id = state["case_id"]
+        duplicate_task = asyncio.to_thread(find_duplicates, vendor, context.vendors, f"{case_id}:duplicate")
+        sanctions_task = asyncio.to_thread(screen_sanctions, vendor, context.sanctions_entities, f"{case_id}:sanctions")
+        policy_query = f"new vendor onboarding {vendor.registered_country or ''} approval required documents bank details sanctions"
+        policy_task = asyncio.to_thread(retrieve_policies, policy_query, context.policies, f"{case_id}:policy")
+        duplicate_result, risk_result, policy_result = await asyncio.gather(duplicate_task, sanctions_task, policy_task)
+        return {
+            "current_node": "specialist_analysis",
+            "duplicate_result": duplicate_result.model_dump(mode="json"),
+            "risk_result": risk_result.model_dump(mode="json"),
+            "policy_result": policy_result.model_dump(mode="json"),
+            "events": [_event(
+                "SPECIALIST_ANALYSIS_COMPLETED",
+                duplicate_status=duplicate_result.status,
+                risk_status=risk_result.status,
+                policy_status=policy_result.status,
+            )],
+        }
+    return run
+
+
+def evidence_node(state: AgentState) -> dict[str, Any]:
+    vendor = ExtractedVendor.model_validate(state["extracted_vendor"])
+    duplicate_result = state["duplicate_result"]
+    risk_result = state["risk_result"]
+    policy_result = state["policy_result"]
+    duplicates = duplicate_result.get("data") or []
+    risk = RiskAssessment.model_validate(risk_result.get("data") or {"disposition": "UNAVAILABLE"})
+    policy_data = policy_result.get("data") or {"disposition": "INSUFFICIENT_EVIDENCE", "clauses": []}
+    policies = [PolicyClause.model_validate(item) for item in policy_data.get("clauses", [])]
+    evidence: list[EvidenceRef] = []
+    for result in (duplicate_result, risk_result, policy_result):
+        evidence.extend(EvidenceRef.model_validate(item) for item in result.get("evidence", []))
+    evidence.extend(EvidenceRef(
+        source_type="POLICY", source_id=f"{clause.policy_id}:{clause.version}:{clause.clause_id}",
+        locator={"effective_date": clause.effective_date}, reason_code="POLICY_CLAUSE", confidence=clause.score,
+    ) for clause in policies)
+    unresolved = list(vendor.fields_requiring_confirmation)
+    reason_codes: list[str] = []
+    if any(item.get("review_required") for item in duplicates):
+        reason_codes.append("POSSIBLE_DUPLICATE")
+    if risk.disposition == "POSSIBLE_MATCH":
+        reason_codes.append("SANCTIONS_REVIEW_REQUIRED")
+    elif risk.disposition == "UNAVAILABLE":
+        reason_codes.append("SANCTIONS_DATA_UNAVAILABLE")
+        unresolved.append("sanctions_screening")
+    if policy_data.get("disposition") != "SUPPORTED":
+        reason_codes.append("INSUFFICIENT_POLICY_EVIDENCE")
+        unresolved.append("applicable_policy")
+    if not vendor.legal_name:
+        unresolved.append("legal_name")
+    recommendation: Literal["CREATE_VENDOR", "REJECT", "REQUEST_INFORMATION", "REVIEW_REQUIRED"]
+    if unresolved:
+        recommendation = "REQUEST_INFORMATION"
+    elif reason_codes:
+        recommendation = "REVIEW_REQUIRED"
+    else:
+        recommendation = "CREATE_VENDOR"
+    packet = EvidencePacket(
+        case_id=state["case_id"], run_id=state["run_id"], recommendation=recommendation,
+        reason_codes=reason_codes, extracted_vendor=vendor,
+        duplicate_candidates=duplicates, risk=risk, policy_clauses=policies,
+        evidence=evidence, unresolved_items=sorted(set(unresolved)),
+    )
+    return {
+        "current_node": "evidence_building",
+        "evidence_packet": packet.model_dump(mode="json"),
+        "events": [_event("EVIDENCE_PACKET_BUILT", recommendation=recommendation, unresolved_count=len(unresolved))],
     }
-    
-    # Run the graph
-    for step in graph.stream(initial_state):
-        print(f"Step executed: {list(step.keys())[0]}")
+
+
+def verifier_node(state: AgentState) -> dict[str, Any]:
+    packet = EvidencePacket.model_validate(state["evidence_packet"])
+    blockers: list[str] = []
+    if not packet.extracted_vendor.legal_name:
+        blockers.append("LEGAL_NAME_MISSING")
+    if packet.risk.disposition == "UNAVAILABLE":
+        blockers.append("SANCTIONS_SCREENING_INCOMPLETE")
+    if not packet.policy_clauses:
+        blockers.append("POLICY_EVIDENCE_MISSING")
+    if packet.recommendation == "CREATE_VENDOR" and not packet.evidence:
+        blockers.append("EVIDENCE_MISSING")
+    verification = VerificationResult(passed=not blockers, blocking_reasons=blockers)
+    return {
+        "current_node": "approval_interrupt" if verification.passed else "verification_failed",
+        "verification": verification.model_dump(mode="json"),
+        "events": [_event("VERIFICATION_COMPLETED", passed=verification.passed, blocking_reasons=blockers)],
+    }
+
+
+def route_after_verification(state: AgentState) -> str:
+    return "approval_interrupt" if state["verification"]["passed"] else "verification_failed"
+
+
+def approval_interrupt_node(state: AgentState) -> dict[str, Any]:
+    # Durable pause is persisted by the worker/API as an ApprovalTask. No tool is executed here.
+    return {"current_node": "approval_interrupt", "events": [_event("HUMAN_APPROVAL_REQUIRED")]}
+
+
+def verification_failed_node(state: AgentState) -> dict[str, Any]:
+    return {"current_node": "verification_failed", "events": [_event("RUN_BLOCKED", reasons=state["verification"]["blocking_reasons"])]}
+
+
+def build_graph(context: InvestigationContext):
+    builder = StateGraph(AgentState)
+    builder.add_node("specialist_analysis", specialist_node(context))
+    builder.add_node("evidence_building", evidence_node)
+    builder.add_node("verify_evidence", verifier_node)
+    builder.add_node("approval_interrupt", approval_interrupt_node)
+    builder.add_node("verification_failed", verification_failed_node)
+    builder.set_entry_point("specialist_analysis")
+    builder.add_edge("specialist_analysis", "evidence_building")
+    builder.add_edge("evidence_building", "verify_evidence")
+    builder.add_conditional_edges("verify_evidence", route_after_verification, {
+        "approval_interrupt": "approval_interrupt",
+        "verification_failed": "verification_failed",
+    })
+    builder.add_edge("approval_interrupt", END)
+    builder.add_edge("verification_failed", END)
+    return builder.compile()
+
+
+async def run_investigation(initial_state: AgentState, context: InvestigationContext) -> AgentState:
+    graph = build_graph(context)
+    return await graph.ainvoke(initial_state)

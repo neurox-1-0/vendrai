@@ -1,29 +1,126 @@
-from pydantic import BaseModel, Field
-from typing import Optional
+from enum import StrEnum
+from typing import Any, Generic, Literal, TypeVar
 
-class SupplierDocumentFields(BaseModel):
-    vendor_name: str = Field(description="The legal name of the vendor or supplier")
-    tax_id: Optional[str] = Field(None, description="The VAT, EIN, or other Tax Identification Number")
-    address: Optional[str] = Field(None, description="The primary registered address of the vendor")
-    bank_name: Optional[str] = Field(None, description="Name of the bank where the account is held")
-    bank_account_number: Optional[str] = Field(None, description="The bank account or IBAN number")
-    swift_code: Optional[str] = Field(None, description="The SWIFT or BIC code of the bank")
-    invoice_amount: Optional[float] = Field(None, description="The total amount of the invoice, if present")
-    currency: Optional[str] = Field(None, description="The currency of the invoice, e.g. USD, EUR")
+from pydantic import BaseModel, ConfigDict, Field
 
-class DuplicateDecision(BaseModel):
-    is_duplicate: bool = Field(description="True if the extracted vendor is highly likely a duplicate of the existing ERP vendor")
-    confidence_score: float = Field(description="Confidence score from 0.0 to 1.0 that this is a duplicate")
-    existing_vendor_id: Optional[str] = Field(None, description="The ERP ID of the matched vendor if a duplicate is found")
-    reasoning: str = Field(description="Explanation of why this is or is not considered a duplicate based on name and tax ID matching")
+
+T = TypeVar("T")
+
+
+class ToolStatus(StrEnum):
+    SUCCESS = "SUCCESS"
+    PARTIAL = "PARTIAL"
+    PENDING = "PENDING"
+    FAILED = "FAILED"
+    BLOCKED = "BLOCKED"
+
+
+class EvidenceRef(BaseModel):
+    source_type: str
+    source_id: str
+    locator: dict[str, Any] = Field(default_factory=dict)
+    reason_code: str
+    confidence: float | None = Field(default=None, ge=0, le=1)
+
+
+class ToolResult(BaseModel, Generic[T]):
+    status: ToolStatus
+    data: T | None = None
+    evidence: list[EvidenceRef] = Field(default_factory=list)
+    error_code: str | None = None
+    error_message: str | None = None
+    retryable: bool = False
+    latency_ms: int = Field(default=0, ge=0)
+    provider_version: str
+    idempotency_key: str
+
+
+class ExtractedVendor(BaseModel):
+    legal_name: str | None = None
+    normalized_legal_name: str | None = None
+    tax_id_token: str | None = None
+    bank_account_token: str | None = None
+    registered_country: str | None = None
+    address_masked: str | None = None
+    email_domain: str | None = None
+    phone_token: str | None = None
+    fields_requiring_confirmation: list[str] = Field(default_factory=list)
+
+
+class VendorRecord(BaseModel):
+    vendor_id: str
+    legal_name: str
+    normalized_legal_name: str
+    tax_id_hash: str | None = None
+    bank_account_hash: str | None = None
+    registered_country: str | None = None
+    address_normalized: str | None = None
+    email_domain: str | None = None
+    phone_hash: str | None = None
+
+
+class DuplicateCandidate(BaseModel):
+    vendor_id: str
+    display_name: str
+    score: float = Field(ge=0, le=1)
+    signals: dict[str, float | bool | str | None]
+    review_required: bool
+
+
+class SanctionsEntity(BaseModel):
+    source: Literal["OFAC", "UN", "EU"]
+    dataset_version: str
+    entity_id: str
+    primary_name: str
+    aliases: list[str] = Field(default_factory=list)
+    countries: list[str] = Field(default_factory=list)
+
+
+class SanctionsCandidate(BaseModel):
+    source: str
+    dataset_version: str
+    entity_id: str
+    matched_name: str
+    score: float = Field(ge=0, le=1)
+    exact: bool
+    review_required: bool = True
+
 
 class RiskAssessment(BaseModel):
-    risk_level: str = Field(description="The assigned risk level: LOW, MEDIUM, or HIGH")
-    risk_factors: list[str] = Field(description="List of specific risk factors identified, e.g. 'Sanctions match', 'High-risk country'")
-    requires_manual_review: bool = Field(description="True if the risk level is MEDIUM or HIGH, requiring human approval")
-    reasoning: str = Field(description="Detailed explanation of how the risk level was determined")
+    disposition: Literal["CLEAR", "POSSIBLE_MATCH", "UNAVAILABLE"]
+    candidates: list[SanctionsCandidate] = Field(default_factory=list)
 
-class PolicyEvaluation(BaseModel):
-    policy_adherence: str = Field(description="PASS, FAIL, or REQUIRES_REVIEW based on the vendor and policies")
-    policy_flags: list[str] = Field(description="List of specific policy clauses violated or flagged")
-    reasoning: str = Field(description="Detailed explanation of how the vendor adheres to or violates the retrieved policies")
+
+class PolicyClause(BaseModel):
+    policy_id: str
+    version: str
+    clause_id: str
+    title: str
+    content: str
+    score: float = Field(ge=0, le=1)
+    effective_date: str
+
+
+class PolicyResult(BaseModel):
+    disposition: Literal["SUPPORTED", "INSUFFICIENT_EVIDENCE"]
+    clauses: list[PolicyClause] = Field(default_factory=list)
+
+
+class EvidencePacket(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    case_id: str
+    run_id: str
+    recommendation: Literal["CREATE_VENDOR", "REJECT", "REQUEST_INFORMATION", "REVIEW_REQUIRED"]
+    reason_codes: list[str]
+    extracted_vendor: ExtractedVendor
+    duplicate_candidates: list[DuplicateCandidate]
+    risk: RiskAssessment
+    policy_clauses: list[PolicyClause]
+    evidence: list[EvidenceRef]
+    unresolved_items: list[str]
+
+
+class VerificationResult(BaseModel):
+    passed: bool
+    blocking_reasons: list[str] = Field(default_factory=list)
+    approval_role: str = "approver"

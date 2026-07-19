@@ -1,21 +1,18 @@
-import os
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from typing import Optional
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file='../../.env',
-        env_file_encoding='utf-8',
+        env_file="../../.env",
+        env_file_encoding="utf-8",
         case_sensitive=True,
-        extra='ignore'
+        extra="ignore",
     )
-    
-    # LLM Configuration
-    GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
+
+    # Optional external reasoning remains disabled unless explicitly authorized.
+    GEMINI_API_KEY: str = ""
     DEFAULT_MODEL: str = "gemini-2.5-flash"
-    
-    # OCR Integration
-    OCR_API_URL: str = os.getenv("OCR_API_URL", "https://api.ocr.space/parse/image")
-    OCR_API_KEY: str = os.getenv("OCR_API_KEY", "")
+    ALLOW_EXTERNAL_LLM: bool = False
+
 
 settings = Settings()
