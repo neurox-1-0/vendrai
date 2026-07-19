@@ -1,0 +1,7 @@
+docling-slim[standard]==2.113.0
+presidio-analyzer==2.2.363
+pytesseract==0.3.13
+easyocr==1.7.2
+cryptography==49.0.0
+lxml==6.1.0
+pillow==12.3.0

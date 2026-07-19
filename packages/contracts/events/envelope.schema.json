@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://neurox.local/contracts/events/envelope.schema.json",
+  "title": "NeuroX Event Envelope",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "specversion", "event_id", "event_type", "schema_version", "occurred_at",
+    "tenant_id", "aggregate_type", "aggregate_id", "aggregate_version",
+    "correlation_id", "causation_id", "traceparent", "payload"
+  ],
+  "properties": {
+    "specversion": { "const": "1.0" },
+    "event_id": { "type": "string", "format": "uuid" },
+    "event_type": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]+\\.v[1-9][0-9]*$" },
+    "schema_version": { "type": "integer", "minimum": 1 },
+    "occurred_at": { "type": "string", "format": "date-time" },
+    "tenant_id": { "type": "string", "format": "uuid" },
+    "aggregate_type": { "type": "string", "minLength": 1, "maxLength": 50 },
+    "aggregate_id": { "type": "string", "format": "uuid" },
+    "aggregate_version": { "type": "integer", "minimum": 1 },
+    "correlation_id": { "type": "string", "format": "uuid" },
+    "causation_id": { "type": ["string", "null"], "format": "uuid" },
+    "traceparent": { "type": ["string", "null"], "pattern": "^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$" },
+    "payload": {
+      "type": "object",
+      "description": "PII-free event-specific data. Raw document text and sensitive values are forbidden."
+    }
+  }
+}

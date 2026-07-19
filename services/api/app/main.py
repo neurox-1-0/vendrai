@@ -1,29 +1,82 @@
-from fastapi import FastAPI
-from app.config import settings
+import time
+import uuid
+from datetime import UTC, datetime
 
-from app.routers import cases, documents
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from sqlalchemy import text
+
+from app.config import settings
+from app.database import engine
+from app.routers import approvals, cases, clarifications, documents, evidence, knowledge, notifications, runs
+
 
 app = FastAPI(
-    title="Vendor-to-Pay Multi-Agent Exception System",
-    description="Core API for managing cases, documents, and agent orchestration.",
-    version="0.1.0"
+    title="NeuroX Vendor Onboarding API",
+    description="Tenant-isolated, evidence-driven vendor onboarding and human approval API.",
+    version="1.0.0",
+    docs_url="/docs" if settings.APP_ENV != "production" else None,
 )
 
-app.include_router(cases.router)
-app.include_router(documents.router)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[origin.strip() for origin in settings.CORS_ORIGINS.split(",") if origin.strip()],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Idempotency-Key", "If-Match", "Last-Event-ID", "X-Dev-Tenant-Id", "X-Dev-User-Id", "X-Dev-Roles"],
+)
+
+for router in (cases.router, documents.router, runs.router, approvals.router, evidence.router, notifications.router, knowledge.router, clarifications.router):
+    app.include_router(router, prefix=settings.API_PREFIX)
+
+
+@app.middleware("http")
+async def request_context(request: Request, call_next):
+    request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))[:128]
+    request.state.request_id = request_id
+    started = time.perf_counter()
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = request_id
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["X-Response-Time-Ms"] = str(round((time.perf_counter() - started) * 1000, 2))
+    return response
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error(request: Request, exc: RequestValidationError):
+    return JSONResponse(
+        status_code=422,
+        content={
+            "data": None,
+            "meta": {"request_id": request.state.request_id, "timestamp": datetime.now(UTC).isoformat()},
+            "error": {"code": "VALIDATION_ERROR", "message": "Request validation failed", "details": exc.errors()},
+        },
+    )
+
+
+@app.get("/health/live")
+async def liveness():
+    return {"status": "healthy"}
+
+
+@app.get("/health/ready")
+async def readiness():
+    checks: dict[str, str] = {}
+    try:
+        async with engine.connect() as connection:
+            await connection.execute(text("SELECT 1"))
+        checks["database"] = "healthy"
+    except Exception as exc:
+        checks["database"] = f"unavailable:{type(exc).__name__}"
+    return JSONResponse(
+        status_code=200 if all(value == "healthy" for value in checks.values()) else 503,
+        content={"status": "healthy" if all(value == "healthy" for value in checks.values()) else "degraded", "checks": checks},
+    )
+
 
 @app.get("/")
 async def root():
-    return {"message": "Welcome to Vendrai Vendor-to-Pay System"}
-
-@app.get("/health")
-async def health_check():
-    return {
-        "status": "healthy",
-        "database": "configured" if settings.DATABASE_URL else "missing",
-        "model": settings.DEFAULT_MODEL
-    }
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)
+    return {"service": "neurox-api", "version": app.version, "docs": app.docs_url}
