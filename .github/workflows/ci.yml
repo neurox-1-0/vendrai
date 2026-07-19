@@ -1,0 +1,73 @@
+name: NeuroX CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            services/api/requirements.txt
+            services/agent/requirements.txt
+      - run: pip install -r services/api/requirements.txt -r services/agent/requirements.txt ruff mypy pip-audit
+      - run: ruff check services/api services/agent services/mock_erp
+      - run: mypy --ignore-missing-imports services/api/app/domain services/agent/app
+      - run: pytest -q services/api/tests services/agent/tests
+      - run: pip-audit -r services/api/requirements.txt
+      - run: pip-audit -r services/api/requirements-document.txt
+      - run: pip-audit -r services/api/requirements-retrieval.txt
+      - run: python -m compileall -q services/api services/agent services/mock_erp
+      - run: python -m json.tool packages/contracts/events/envelope.schema.json >/dev/null
+
+  frontend:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.17.0"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npx tsc --noEmit
+      - run: npm run build
+      - run: npm audit --omit=dev --audit-level=high
+
+  compose-and-images:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: cp .env.example .env
+      - run: docker compose config --quiet
+      - run: docker build -f services/api/Dockerfile -t neurox-api:test .
+      - run: docker build -f services/mock_erp/Dockerfile -t neurox-mock-erp:test .
+      - uses: aquasecurity/trivy-action@0.32.0
+        with:
+          image-ref: neurox-api:test
+          format: table
+          exit-code: "1"
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+
+  secrets:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
