@@ -211,18 +211,28 @@ async def process_document_event(envelope: dict) -> None:
             await session.flush()
             remaining = await session.scalar(select(func.count()).select_from(Document).where(Document.case_id == case.case_id, Document.processing_status != "READY"))
             if remaining == 0:
-                case.status = CaseStatus.SPECIALIST_ANALYSIS
                 case.current_version += 1
                 run_id = envelope["payload"].get("run_id")
                 if not run_id:
                     from app.models import AgentRun
                     run_id = await session.scalar(select(AgentRun.run_id).where(AgentRun.case_id == case.case_id).order_by(AgentRun.created_at.desc()))
-                enqueue_event(
-                    session, tenant_id=tenant_id, aggregate_type="case", aggregate_id=case.case_id,
-                    aggregate_version=case.current_version, event_type="agent.analysis.requested.v1",
-                    idempotency_key=f"agent.analysis:{case.case_id}:v{case.current_version}",
-                    payload={"case_id": str(case.case_id), "run_id": str(run_id)},
-                )
+                
+                if case.case_type == "INVOICE_EXCEPTION":
+                    case.status = CaseStatus.INVOICE_MATCHING
+                    enqueue_event(
+                        session, tenant_id=tenant_id, aggregate_type="case", aggregate_id=case.case_id,
+                        aggregate_version=case.current_version, event_type="invoice.analysis.requested.v1",
+                        idempotency_key=f"invoice.analysis:{case.case_id}:v{case.current_version}",
+                        payload={"case_id": str(case.case_id), "run_id": str(run_id)},
+                    )
+                else:
+                    case.status = CaseStatus.SPECIALIST_ANALYSIS
+                    enqueue_event(
+                        session, tenant_id=tenant_id, aggregate_type="case", aggregate_id=case.case_id,
+                        aggregate_version=case.current_version, event_type="agent.analysis.requested.v1",
+                        idempotency_key=f"agent.analysis:{case.case_id}:v{case.current_version}",
+                        payload={"case_id": str(case.case_id), "run_id": str(run_id)},
+                    )
             session.add(InboxReceipt(consumer_name="document-worker", event_id=event_id, tenant_id=tenant_id))
 
 
