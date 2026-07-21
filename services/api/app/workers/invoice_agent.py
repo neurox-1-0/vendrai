@@ -136,11 +136,54 @@ def extract_invoice_from_pdf_file(pdf_path: Path) -> dict | None:
             "total_amount": total_amt or sum(item["amount"] for item in line_items),
             "tax_amount": tax_amt,
             "currency": currency,
-            "line_items": line_items
+            "line_items": line_items,
+            "bank_account": bank_account
         }
     except Exception as exc:
         logger.warning("Local pypdf extraction exception: %s", exc)
         return None
+
+
+def extract_po_and_grn_from_documents(documents: list) -> tuple[dict, dict]:
+    po_data = {"lines": {}}
+    grn_data = {"lines": {}}
+    
+    for doc in documents:
+        if not getattr(doc, "storage_key", None):
+            continue
+        file_path = settings.LOCAL_STORAGE_ROOT / doc.storage_key
+        if not file_path.exists():
+            continue
+            
+        try:
+            import pypdf
+            import re
+            reader = pypdf.PdfReader(str(file_path))
+            text = "\n".join([page.extract_text() or "" for page in reader.pages])
+            
+            if "PURCHASE ORDER" in text:
+                lines = re.findall(r"(\d+)\s*\n\s*([^\n]+)\s*\n\s*(\d+(?:\.\d+)?)\s*\n\s*(?:[A-Z]{3}\s+)?([\d,]+\.?\d*)\s*\n\s*(?:[A-Z]{3}\s+)?([\d,]+\.?\d*)", text)
+                for item in lines:
+                    l_num, desc, qty, u_price, total = item
+                    po_data["lines"][int(l_num)] = {
+                        "description": desc.strip(),
+                        "quantity": float(qty),
+                        "unit_price": float(u_price.replace(",", "")),
+                        "amount": float(total.replace(",", ""))
+                    }
+            elif "GOODS RECEIPT" in text:
+                lines = re.findall(r"(\d+)\s*\n\s*([^\n]+)\s*\n\s*(\d+(?:\.\d+)?)\s*\n\s*(\d+(?:\.\d+)?)", text)
+                for item in lines:
+                    l_num, desc, ordered, received = item
+                    grn_data["lines"][int(l_num)] = {
+                        "description": desc.strip(),
+                        "ordered": float(ordered),
+                        "received": float(received)
+                    }
+        except Exception as exc:
+            logger.warning("Error reading doc for PO/GRN: %s", exc)
+            
+    return po_data, grn_data
 
 
 async def run_invoice_analysis(envelope: dict) -> None:
@@ -243,31 +286,67 @@ Output MUST be a valid JSON object matching this schema:
                     ]
                 }
                 
-            # Dynamic 3-Way Match logic based on extraction
+            # Real 3-Way Match logic comparing Invoice lines vs PO & GRN documents
+            all_case_docs = (await session.execute(select(Document).where(Document.case_id == case_id))).scalars().all()
+            po_data, grn_data = extract_po_and_grn_from_documents(all_case_docs)
+            
             line_matches = []
             overall_variance = 0.0
             exceptions = []
             
             for idx, item in enumerate(extracted_invoice["line_items"]):
-                # Mock a PO price that is exactly $10 less than the extracted invoice price for the LAST item
-                is_variance = (idx == len(extracted_invoice["line_items"]) - 1)
-                variance_amt = 10.0 if is_variance else 0.0
+                l_num = item.get("line_number", idx + 1)
+                po_item = po_data["lines"].get(l_num)
+                grn_item = grn_data["lines"].get(l_num)
                 
+                po_price = po_item["unit_price"] if po_item else None
+                po_qty = po_item["quantity"] if po_item else None
+                grn_qty = grn_item["received"] if grn_item else po_qty
+                
+                inv_price = item.get("unit_price", 0.0)
+                inv_qty = item.get("quantity", 0.0)
+                
+                price_variance = (inv_price - po_price) if (po_price is not None) else 0.0
+                qty_variance = (inv_qty - grn_qty) if (grn_qty is not None) else 0.0
+                
+                if price_variance < 0:
+                    price_variance = 0.0
+                    
+                match_status = "MATCHED"
+                if price_variance > 0 or qty_variance > 0:
+                    match_status = "PARTIAL_MATCH"
+                    
                 line_matches.append({
                     "invoice_line": item,
-                    "price_variance": variance_amt,
-                    "quantity_variance": 0.0,
-                    "match_status": "PARTIAL_MATCH" if variance_amt > 0 else "MATCHED"
+                    "po_line": {"quantity": po_qty, "unit_price": po_price} if (po_price is not None) else None,
+                    "grn_line": {"quantity_received": grn_qty} if (grn_qty is not None) else None,
+                    "price_variance": price_variance,
+                    "quantity_variance": qty_variance,
+                    "match_status": match_status
                 })
                 
-                overall_variance += variance_amt
-                if variance_amt > 0:
+                line_tot_variance = price_variance * inv_qty
+                overall_variance += line_tot_variance
+                
+                if price_variance > 0:
                     exceptions.append({
                         "exception_type": "PRICE_VARIANCE",
-                        "severity": "LOW",
+                        "severity": "LOW" if price_variance <= 50.0 else "MEDIUM",
                         "confidence": 0.95,
-                        "mismatch_details": {"message": f"Price variance found on {item['description']} (Variance: {variance_amt})"},
-                        "affected_lines": [item["line_number"]]
+                        "mismatch_details": {
+                            "message": f"Price variance found on {item['description']}: Invoice LKR {inv_price:,.2f} vs PO LKR {po_price:,.2f} (Variance: LKR {price_variance:,.2f})"
+                        },
+                        "affected_lines": [l_num]
+                    })
+                if qty_variance > 0:
+                    exceptions.append({
+                        "exception_type": "QUANTITY_VARIANCE",
+                        "severity": "MEDIUM",
+                        "confidence": 0.95,
+                        "mismatch_details": {
+                            "message": f"Quantity variance found on {item['description']}: Invoice Qty {inv_qty} vs GRN Received Qty {grn_qty}"
+                        },
+                        "affected_lines": [l_num]
                     })
             
             match_result = {
