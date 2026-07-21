@@ -18,6 +18,10 @@ const presentation: Record<CaseStatus, { label: string; classes: string; icon: t
   ERP_SYNC_PENDING: { label: "Syncing", classes: "bg-blue-100 text-blue-900", icon: RotateCw },
   ERP_SYNC_FAILED: { label: "ERP retry required", classes: "bg-red-100 text-red-900", icon: AlertTriangle },
   COMPLETED: { label: "Completed", classes: "bg-emerald-100 text-emerald-900", icon: CheckCircle2 },
+  INVOICE_MATCHING: { label: "Matching invoice", classes: "bg-indigo-100 text-indigo-900", icon: RotateCw },
+  EXCEPTION_CLASSIFIED: { label: "Classifying exception", classes: "bg-fuchsia-100 text-fuchsia-900", icon: RotateCw },
+  TOLERANCE_CHECK: { label: "Tolerance check", classes: "bg-teal-100 text-teal-900", icon: RotateCw },
+  AUTO_RESOLVED: { label: "Auto-resolved", classes: "bg-emerald-100 text-emerald-900", icon: CheckCircle2 },
   FAILED: { label: "Failed", classes: "bg-red-100 text-red-900", icon: XCircle },
   CANCELLED: { label: "Cancelled", classes: "bg-slate-200 text-slate-800", icon: XCircle },
 };

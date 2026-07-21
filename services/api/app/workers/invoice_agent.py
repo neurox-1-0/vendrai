@@ -104,23 +104,38 @@ async def run_invoice_analysis(envelope: dict) -> None:
                         from google import genai
                         from google.genai import types
                         client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
-                        uploaded_file = client.files.upload(file=str(file_path))
+                        uploaded_file = client.files.upload(path=str(file_path))
                         
-                        prompt = "Extract the invoice details from this document. Ensure you capture line items correctly."
+                        prompt = """Extract the invoice details from this document. Ensure you capture line items correctly.
+Output MUST be a valid JSON object matching this schema:
+{
+  "invoice_number": "string",
+  "vendor_name": "string",
+  "total_amount": 0.0,
+  "tax_amount": 0.0,
+  "currency": "string",
+  "line_items": [
+    {
+      "line_number": 1,
+      "description": "string",
+      "quantity": 0.0,
+      "unit_price": 0.0,
+      "amount": 0.0,
+      "tax_rate": 0.0,
+      "po_line_ref": "string"
+    }
+  ]
+}"""
                         response = client.models.generate_content(
                             model=settings.DEFAULT_MODEL,
                             contents=[uploaded_file, prompt],
                             config=types.GenerateContentConfig(
                                 response_mime_type="application/json",
-                                response_schema=ExtractedInvoice,
                                 temperature=0.0
                             ),
                         )
-                        if response.parsed:
-                            extracted_invoice = response.parsed.model_dump()
-                        else:
-                            extracted_invoice = json.loads(response.text)
-                        
+                        extracted_invoice = json.loads(response.text)
+
                         try:
                             client.files.delete(name=uploaded_file.name)
                         except Exception:

@@ -26,6 +26,7 @@ export default function InvoiceIntake() {
     try {
       setProgress("Preparing upload...");
       const dummyCase = await api.createCase(`Upload for ${invoiceNumber}`, priority);
+      await new Promise(resolve => setTimeout(resolve, 500)); // Wait for backend transaction to commit
       
       let documentId;
       for (const [index, file] of files.entries()) {

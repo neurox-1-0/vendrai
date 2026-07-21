@@ -188,6 +188,7 @@ services:
     environment:
       <<: *api-environment
       DOCUMENT_PROCESSOR: docling
+      HF_HOME: /var/lib/neurox/objects/huggingface
     command: ["python", "-m", "app.workers.document"]
     volumes: [object_data:/var/lib/neurox/objects]
     networks: [app, data]

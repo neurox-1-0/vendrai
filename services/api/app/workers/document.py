@@ -178,9 +178,8 @@ async def process_document_event(envelope: dict) -> None:
             extension = {"application/pdf": ".pdf", "image/png": ".png", "image/jpeg": ".jpg"}.get(document.mime_type, "")
             destination = settings.LOCAL_STORAGE_ROOT.resolve() / "documents" / str(tenant_id) / f"{document_id}{extension}"
             destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(source, destination)
             document.storage_key = f"documents/{tenant_id}/{document_id}{extension}"
-            pages, parser_version = await asyncio.to_thread(extract_document, destination, document.mime_type)
+            pages, parser_version = await asyncio.to_thread(extract_document, source, document.mime_type)
             combined = "\n".join(text for _, text, _ in pages)
             for page_number, text, layout in pages:
                 session.add(DocumentPage(
@@ -205,6 +204,7 @@ async def process_document_event(envelope: dict) -> None:
                     source_page=1, source_bbox={}, extractor_type="deterministic-regex",
                     extractor_version="1.0.0", human_verified=False,
                 ))
+            shutil.move(source, destination)
             document.processing_status = "READY"
             document.parser_version = parser_version
             await append_case_event(session, tenant_id=tenant_id, case_id=case.case_id, event_type="DOCUMENT_READY", actor_type="SYSTEM", actor_id="document-worker", payload={"document_id": str(document_id), "pages": len(pages)})

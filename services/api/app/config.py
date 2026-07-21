@@ -18,7 +18,7 @@ class Settings(BaseSettings):
 
     APP_ENV: Literal["development", "test", "production"] = "development"
     ALLOW_EXTERNAL_LLM: bool = False
-    DEFAULT_MODEL: str = "gemini-2.5-flash"
+    DEFAULT_MODEL: str = "gemini-1.5-flash"
     API_PREFIX: str = "/api/v1"
     LOG_LEVEL: str = "INFO"
     CORS_ORIGINS: str = "http://localhost:3000"
@@ -61,7 +61,7 @@ class Settings(BaseSettings):
     OCR_FALLBACK: str = "easyocr"
 
     GEMINI_API_KEY: str = ""
-    DEFAULT_MODEL: str = "gemini-2.5-flash"
+    DEFAULT_MODEL: str = "gemini-1.5-flash"
     ALLOW_EXTERNAL_LLM: bool = False
     ALLOW_SYNTHETIC_LLM_DATA_ONLY: bool = True
     DATA_ENCRYPTION_SECRET: str = "development-encryption-secret-change-me"
