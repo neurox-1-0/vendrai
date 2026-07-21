@@ -54,6 +54,13 @@ export default function CaseDetail() {
   if (caseQuery.isLoading) return <p className="p-12" aria-live="polite">Loading case…</p>;
   if (caseQuery.isError || !caseQuery.data) return <p className="p-12 text-red-800" role="alert">Unable to load case: {caseQuery.error?.message}</p>;
   const currentCase = caseQuery.data;
+  const currencyCode = (task?.evidence_packet?.extracted_invoice as any)?.currency || 'USD';
+  const formatCurrency = (amount: number | string | undefined | null) => {
+    if (amount == null || amount === "-") return "-";
+    const num = typeof amount === 'string' ? parseFloat(amount) : amount;
+    if (isNaN(num)) return String(amount);
+    return new Intl.NumberFormat('en-US', { style: 'currency', currency: currencyCode }).format(num);
+  };
 
   return (
     <div className="min-h-full p-6 lg:p-12">
@@ -124,7 +131,7 @@ export default function CaseDetail() {
                 {!!task.evidence_packet.match_result && (
                   <div>
                     <h3 className="font-bold text-sm mb-2">3-Way Match Result: {(task.evidence_packet.match_result as any).match_status}</h3>
-                    <p className="text-sm text-[var(--color-muted)]">Total Variance: ${(task.evidence_packet.match_result as any).overall_variance_amount?.toFixed(2)} ({(task.evidence_packet.match_result as any).overall_variance_pct?.toFixed(2)}%)</p>
+                    <p className="text-sm text-[var(--color-muted)]">Total Variance: {formatCurrency((task.evidence_packet.match_result as any).overall_variance_amount)} ({(task.evidence_packet.match_result as any).overall_variance_pct?.toFixed(2)}%)</p>
                     
                     <div className="mt-4 overflow-x-auto">
                       <table className="w-full text-sm text-left">
@@ -146,8 +153,8 @@ export default function CaseDetail() {
                               <td className="px-4 py-2">{m.invoice_line?.description}</td>
                               <td className="px-4 py-2">{m.invoice_line?.quantity}</td>
                               <td className="px-4 py-2">{m.grn_line?.quantity_received || m.po_line?.quantity || "-"}</td>
-                              <td className="px-4 py-2">${m.invoice_line?.unit_price}</td>
-                              <td className="px-4 py-2">${m.po_line?.unit_price || "-"}</td>
+                              <td className="px-4 py-2">{formatCurrency(m.invoice_line?.unit_price)}</td>
+                              <td className="px-4 py-2">{formatCurrency(m.po_line?.unit_price)}</td>
                               <td className="px-4 py-2 font-bold">{m.match_status}</td>
                             </tr>
                           ))}
@@ -164,7 +171,7 @@ export default function CaseDetail() {
                     <p className="text-sm">
                       {(task.evidence_packet.tolerance as any).within_tolerance ? "✅ Within Tolerance" : "❌ Exceeds Tolerance"} 
                       <span className="text-xs text-[var(--color-muted)] ml-2">
-                        (Threshold: ${(task.evidence_packet.tolerance as any).threshold_amount}, {(task.evidence_packet.tolerance as any).threshold_pct}%)
+                        (Threshold: {formatCurrency((task.evidence_packet.tolerance as any).threshold_amount)}, {(task.evidence_packet.tolerance as any).threshold_pct}%)
                       </span>
                     </p>
                   </div>
