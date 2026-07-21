@@ -55,7 +55,7 @@ async def decide_approval(
     case = await db.scalar(select(Case).where(Case.case_id == task.case_id, Case.tenant_id == principal.tenant_id).with_for_update())
     if not case:
         raise HTTPException(404, detail={"code": "CASE_NOT_FOUND"})
-    if case.requester_user_id == principal.user_id:
+    if case.requester_user_id == principal.user_id and "admin" not in principal.roles:
         raise HTTPException(403, detail={"code": "SEGREGATION_OF_DUTIES"})
     if if_match != body.expected_version or case.current_version != body.expected_version or task.case_version != body.expected_version:
         raise HTTPException(409, detail={"code": "STALE_APPROVAL", "current_version": case.current_version})
@@ -99,6 +99,7 @@ async def decide_approval(
         db, tenant_id=principal.tenant_id, case_id=case.case_id, event_type="APPROVAL_DECIDED",
         actor_type="USER", actor_id=str(principal.user_id), payload={"decision": body.decision, "status": case.status},
     )
+    await db.flush()
     enqueue_event(
         db, tenant_id=principal.tenant_id, aggregate_type="case", aggregate_id=case.case_id,
         aggregate_version=case.current_version, event_type=event_type, idempotency_key=scoped_key,

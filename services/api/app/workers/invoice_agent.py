@@ -146,7 +146,7 @@ async def run_invoice_analysis(envelope: dict) -> None:
                 tenant_id=tenant_id, case_id=case_id, run_id=run_id,
                 task_type="INVOICE_EXCEPTION_RESOLUTION", status="PENDING",
                 assigned_role="finance_approver", proposed_action={"action": "RESOLVE_EXCEPTION"},
-                evidence_packet=evidence_packet, evidence_hash="mock-hash", case_version=case.current_version
+                evidence_packet=evidence_packet, evidence_hash="0000000000000000000000000000000000000000000000000000000000000000", case_version=case.current_version
             ))
             
             await append_case_event(session, tenant_id=tenant_id, case_id=case_id, event_type="APPROVAL_REQUIRED", actor_type="SYSTEM", actor_id="invoice-worker", payload={"reason": "Manual review required for exceptions"})
