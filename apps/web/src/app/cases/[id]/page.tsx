@@ -99,6 +99,79 @@ export default function CaseDetail() {
               {!evidence.isLoading && (evidence.data?.items ?? []).length === 0 && <p className="text-sm text-[var(--color-muted)]">Evidence is not ready yet. The case will remain visibly blocked if a mandatory source is unavailable.</p>}
             </div>
           </Card>
+          
+          {currentCase.case_type === "INVOICE_EXCEPTION" && task?.evidence_packet && (
+            <Card>
+              <div className="mb-6 flex items-center gap-3"><FileSearch className="h-6 w-6 text-[var(--color-accent)]" /><h2 className="font-display text-xl font-bold">Invoice Analysis Details</h2></div>
+              <div className="space-y-6">
+                
+                {/* Exceptions */}
+                {Array.isArray(task.evidence_packet.exception) && task.evidence_packet.exception.length > 0 && (
+                  <div>
+                    <h3 className="font-bold text-sm mb-2 text-red-600">Detected Exceptions</h3>
+                    <ul className="space-y-2">
+                      {(task.evidence_packet.exception as any[]).map((exc, i) => (
+                        <li key={i} className="text-sm bg-red-50 p-3 rounded-lg border border-red-100">
+                          <span className="font-bold">{exc.exception_type}</span> ({exc.severity})
+                          <p className="text-xs mt-1">{exc.mismatch_details?.message}</p>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                
+                {/* 3-Way Match Result */}
+                {!!task.evidence_packet.match_result && (
+                  <div>
+                    <h3 className="font-bold text-sm mb-2">3-Way Match Result: {(task.evidence_packet.match_result as any).match_status}</h3>
+                    <p className="text-sm text-[var(--color-muted)]">Total Variance: ${(task.evidence_packet.match_result as any).overall_variance_amount?.toFixed(2)} ({(task.evidence_packet.match_result as any).overall_variance_pct?.toFixed(2)}%)</p>
+                    
+                    <div className="mt-4 overflow-x-auto">
+                      <table className="w-full text-sm text-left">
+                        <thead className="text-xs uppercase bg-slate-100">
+                          <tr>
+                            <th className="px-4 py-2">Line</th>
+                            <th className="px-4 py-2">Description</th>
+                            <th className="px-4 py-2">Inv Qty</th>
+                            <th className="px-4 py-2">PO/GRN Qty</th>
+                            <th className="px-4 py-2">Inv Price</th>
+                            <th className="px-4 py-2">PO Price</th>
+                            <th className="px-4 py-2">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {((task.evidence_packet.match_result as any).line_matches || []).map((m: any, i: number) => (
+                            <tr key={i} className="border-b">
+                              <td className="px-4 py-2">{m.invoice_line?.line_number}</td>
+                              <td className="px-4 py-2">{m.invoice_line?.description}</td>
+                              <td className="px-4 py-2">{m.invoice_line?.quantity}</td>
+                              <td className="px-4 py-2">{m.grn_line?.quantity_received || m.po_line?.quantity || "-"}</td>
+                              <td className="px-4 py-2">${m.invoice_line?.unit_price}</td>
+                              <td className="px-4 py-2">${m.po_line?.unit_price || "-"}</td>
+                              <td className="px-4 py-2 font-bold">{m.match_status}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+                
+                {/* Tolerance Check */}
+                {!!task.evidence_packet.tolerance && (
+                  <div className="bg-slate-50 p-4 rounded-lg">
+                    <h3 className="font-bold text-sm mb-1">Tolerance Check</h3>
+                    <p className="text-sm">
+                      {(task.evidence_packet.tolerance as any).within_tolerance ? "✅ Within Tolerance" : "❌ Exceeds Tolerance"} 
+                      <span className="text-xs text-[var(--color-muted)] ml-2">
+                        (Threshold: ${(task.evidence_packet.tolerance as any).threshold_amount}, {(task.evidence_packet.tolerance as any).threshold_pct}%)
+                      </span>
+                    </p>
+                  </div>
+                )}
+              </div>
+            </Card>
+          )}
         </div>
 
         <aside className="space-y-8">

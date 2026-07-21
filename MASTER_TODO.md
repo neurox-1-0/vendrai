@@ -36,4 +36,4 @@ Only acceptance-test-backed work may move to `VERIFIED` in `CURRENT_STATUS.md`.
 - [ ] Provision the optional Langfuse v3 profile with ClickHouse, Valkey and blob storage.
 - [ ] Add Slack/Teams notification adapters without coupling them to case transitions.
 - [ ] Add Kubernetes manifests only after the Compose acceptance profile passes.
-- [ ] Start invoice-exception functionality only after supplier onboarding meets all gates.
+- [x] Start invoice-exception functionality only after supplier onboarding meets all gates.

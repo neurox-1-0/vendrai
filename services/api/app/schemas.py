@@ -174,3 +174,12 @@ class PolicyResponse(BaseModel):
 class ClarificationResponseRequest(BaseModel):
     answers: dict[str, str]
     expected_version: int = Field(gt=0)
+
+
+class InvoiceSubmissionRequest(BaseModel):
+    invoice_number: str = Field(min_length=1, max_length=50)
+    document_id: UUID | None = None
+    priority: Literal["LOW", "NORMAL", "HIGH", "URGENT"] = "NORMAL"
+    po_number: str | None = Field(default=None, max_length=50)
+    vendor_id: UUID | None = None
+

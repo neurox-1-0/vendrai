@@ -10,7 +10,7 @@ from sqlalchemy import text
 
 from app.config import settings
 from app.database import engine
-from app.routers import approvals, cases, clarifications, documents, evidence, knowledge, notifications, runs
+from app.routers import approvals, cases, clarifications, documents, evidence, invoices, knowledge, notifications, runs
 
 
 app = FastAPI(
@@ -28,7 +28,7 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type", "Idempotency-Key", "If-Match", "Last-Event-ID", "X-Dev-Tenant-Id", "X-Dev-User-Id", "X-Dev-Roles"],
 )
 
-for router in (cases.router, documents.router, runs.router, approvals.router, evidence.router, notifications.router, knowledge.router, clarifications.router):
+for router in (cases.router, documents.router, runs.router, approvals.router, evidence.router, notifications.router, knowledge.router, clarifications.router, invoices.router):
     app.include_router(router, prefix=settings.API_PREFIX)
 
 

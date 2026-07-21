@@ -115,7 +115,8 @@ services:
     networks: [data]
 
   clamav:
-    image: clamav/clamav:1.4.2
+    image: clamav/clamav:1.4.5
+    platform: linux/amd64
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "/usr/local/bin/clamdcheck.sh"]
@@ -198,6 +199,14 @@ services:
   agent-worker:
     <<: *api-image
     command: ["python", "-m", "app.workers.agent"]
+    depends_on:
+      <<: *worker-depends
+      retrieval-api:
+        condition: service_healthy
+
+  invoice-worker:
+    <<: *api-image
+    command: ["python", "-m", "app.workers.invoice_agent"]
     depends_on:
       <<: *worker-depends
       retrieval-api:

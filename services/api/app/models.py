@@ -475,3 +475,118 @@ class ErpOperation(Base, TimestampMixin):
     provider_reference: Mapped[str | None] = mapped_column(String(120))
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     last_error: Mapped[str | None] = mapped_column(Text)
+
+
+# ---------------------------------------------------------------------------
+# AP Extension — Invoice Exception Handling (Blueprint §7.5)
+# ---------------------------------------------------------------------------
+
+
+class PurchaseOrder(Base, TimestampMixin):
+    __tablename__ = "purchase_orders"
+    __table_args__ = (UniqueConstraint("tenant_id", "po_number"),)
+    purchase_order_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.tenant_id"), index=True)
+    vendor_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("vendors.vendor_id"), index=True)
+    po_number: Mapped[str] = mapped_column(String(80))
+    total_amount: Mapped[float]
+    currency: Mapped[str] = mapped_column(String(3), default="USD")
+    status: Mapped[str] = mapped_column(String(30), default="OPEN")
+    issued_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    delivery_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class PurchaseOrderLine(Base):
+    __tablename__ = "purchase_order_lines"
+    __table_args__ = (UniqueConstraint("purchase_order_id", "line_number"),)
+    po_line_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.tenant_id"), index=True)
+    purchase_order_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("purchase_orders.purchase_order_id", ondelete="CASCADE"), index=True)
+    line_number: Mapped[int] = mapped_column(Integer)
+    item_description: Mapped[str] = mapped_column(Text)
+    quantity: Mapped[float]
+    unit_price: Mapped[float]
+    amount: Mapped[float]
+    tax_rate: Mapped[float] = mapped_column(default=0.0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class GoodsReceipt(Base, TimestampMixin):
+    __tablename__ = "goods_receipts"
+    __table_args__ = (UniqueConstraint("tenant_id", "grn_number"),)
+    goods_receipt_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.tenant_id"), index=True)
+    purchase_order_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("purchase_orders.purchase_order_id"), index=True)
+    grn_number: Mapped[str] = mapped_column(String(80))
+    received_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    received_by: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(30), default="RECEIVED")
+
+
+class GoodsReceiptLine(Base):
+    __tablename__ = "goods_receipt_lines"
+    __table_args__ = (UniqueConstraint("goods_receipt_id", "line_number"),)
+    grn_line_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.tenant_id"), index=True)
+    goods_receipt_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("goods_receipts.goods_receipt_id", ondelete="CASCADE"), index=True)
+    po_line_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("purchase_order_lines.po_line_id"), index=True)
+    line_number: Mapped[int] = mapped_column(Integer)
+    quantity_received: Mapped[float]
+    quality_status: Mapped[str] = mapped_column(String(30), default="ACCEPTED")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class InvoiceRecord(Base, TimestampMixin):
+    __tablename__ = "invoices"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "invoice_number", "vendor_id"),
+        Index("ix_invoices_tenant_vendor", "tenant_id", "vendor_id"),
+    )
+    invoice_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.tenant_id"), index=True)
+    case_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("cases.case_id"), index=True)
+    vendor_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("vendors.vendor_id"), index=True)
+    invoice_number: Mapped[str] = mapped_column(String(120))
+    po_number: Mapped[str | None] = mapped_column(String(80))
+    total_amount: Mapped[float]
+    tax_amount: Mapped[float] = mapped_column(default=0.0)
+    currency: Mapped[str] = mapped_column(String(3), default="USD")
+    invoice_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    due_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    payment_terms: Mapped[str | None] = mapped_column(String(80))
+    status: Mapped[str] = mapped_column(String(30), default="RECEIVED")
+
+
+class InvoiceLine(Base):
+    __tablename__ = "invoice_lines"
+    __table_args__ = (UniqueConstraint("invoice_id", "line_number"),)
+    invoice_line_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.tenant_id"), index=True)
+    invoice_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("invoices.invoice_id", ondelete="CASCADE"), index=True)
+    line_number: Mapped[int] = mapped_column(Integer)
+    description: Mapped[str] = mapped_column(Text)
+    quantity: Mapped[float]
+    unit_price: Mapped[float]
+    amount: Mapped[float]
+    tax_rate: Mapped[float] = mapped_column(default=0.0)
+    po_line_ref: Mapped[str | None] = mapped_column(String(80))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class InvoiceException(Base, TimestampMixin):
+    __tablename__ = "invoice_exceptions"
+    invoice_exception_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.tenant_id"), index=True)
+    case_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("cases.case_id", ondelete="CASCADE"), index=True)
+    invoice_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("invoices.invoice_id"), index=True)
+    exception_type: Mapped[str] = mapped_column(String(40))
+    severity: Mapped[str] = mapped_column(String(20), default="MEDIUM")
+    mismatch_details: Mapped[dict[str, Any]] = mapped_column(JSONType, default=dict)
+    variance_amount: Mapped[float | None]
+    variance_pct: Mapped[float | None]
+    tolerance_threshold_amount: Mapped[float | None]
+    tolerance_threshold_pct: Mapped[float | None]
+    within_tolerance: Mapped[bool | None] = mapped_column(Boolean)
+    resolution_status: Mapped[str] = mapped_column(String(30), default="OPEN")
+    resolution_details: Mapped[dict[str, Any]] = mapped_column(JSONType, default=dict)
+    policy_reference: Mapped[str | None] = mapped_column(Text)

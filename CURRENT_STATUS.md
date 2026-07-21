@@ -36,6 +36,16 @@ Last updated: 2026-07-19
 | 100-case evaluation suite and required quality thresholds | NOT_STARTED | Required before release. |
 | Backup/restore, load, chaos and security acceptance run | NOT_STARTED | Required before release. |
 
+## Invoice Exception Handling vertical slice
+
+| Capability | Status | Evidence / remaining gate |
+|---|---|---|
+| Domain models and database schema for AP elements | IMPLEMENTED | Models, Alembic migration, and CaseStatus extensions exist; database creation blocked by Docker. |
+| Deterministic 3-way matching and tolerance engine | VERIFIED | Extraction, matching, classifier, and tolerance tools have unit tests. |
+| Invoice LangGraph orchestrator and events worker | IMPLEMENTED | Specialist node, evidence building, and human approval interrupts exist; live worker test remains. |
+| Mock ERP resolution endpoints | IMPLEMENTED | ERP worker syncs exceptions and updates case status; E2E timeout/retry test remains. |
+| Frontend case submission and exception dashboard | IMPLEMENTED | Invoice submission form and detailed line-by-line mismatch dashboard exist; E2E Playwright test remains. |
+
 ## Latest local verification
 
 - API: `7 passed`.

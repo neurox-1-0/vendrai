@@ -23,6 +23,7 @@ def connection() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     db = sqlite3.connect(DB_PATH)
     db.execute("CREATE TABLE IF NOT EXISTS vendor_writes (idempotency_key TEXT PRIMARY KEY, erp_vendor_id TEXT NOT NULL, payload TEXT NOT NULL)")
+    db.execute("CREATE TABLE IF NOT EXISTS invoice_resolutions (idempotency_key TEXT PRIMARY KEY, resolution_id TEXT NOT NULL, case_id TEXT NOT NULL, payload TEXT NOT NULL)")
     return db
 
 
@@ -42,6 +43,26 @@ def create_vendor(body: VendorCreate, idempotency_key: str = Header(alias="Idemp
         )
         db.commit()
         return {"erp_vendor_id": erp_vendor_id, "idempotent_replay": False}
+    finally:
+        db.close()
+
+
+@app.post("/v1/invoice-exceptions/{case_id}/resolve", status_code=201)
+def resolve_invoice_exception(case_id: str, body: dict, idempotency_key: str = Header(alias="Idempotency-Key")):
+    if not idempotency_key:
+        raise HTTPException(400, detail={"code": "IDEMPOTENCY_KEY_REQUIRED"})
+    db = connection()
+    try:
+        existing = db.execute("SELECT resolution_id FROM invoice_resolutions WHERE idempotency_key = ?", (idempotency_key,)).fetchone()
+        if existing:
+            return {"resolution_id": existing[0], "idempotent_replay": True}
+        resolution_id = "RES-" + hashlib.sha256(idempotency_key.encode()).hexdigest()[:10].upper()
+        db.execute(
+            "INSERT INTO invoice_resolutions(idempotency_key, resolution_id, case_id, payload) VALUES (?, ?, ?, ?)",
+            (idempotency_key, resolution_id, case_id, json.dumps(body, sort_keys=True)),
+        )
+        db.commit()
+        return {"resolution_id": resolution_id, "idempotent_replay": False}
     finally:
         db.close()
 
