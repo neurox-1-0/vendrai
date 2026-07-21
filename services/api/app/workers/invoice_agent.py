@@ -105,6 +105,9 @@ def extract_invoice_from_pdf_file(pdf_path: Path) -> dict | None:
         if tax_match:
             tax_amt = float(tax_match.group(1).replace(",", ""))
 
+        bank_match = re.search(r"(?:Account\s+number|IBAN|Account)[:\s\n]+([0-9-]+)", text, re.IGNORECASE)
+        bank_account = bank_match.group(1).strip() if bank_match else None
+
         line_items = []
         line_pattern = re.findall(r"(\d+)\s*\n\s*([^\n]+)\s*\n\s*(\d+(?:\.\d+)?)\s*\n\s*(?:[A-Z]{3}\s+)?([\d,]+\.?\d*)\s*\n\s*(?:[A-Z]{3}\s+)?([\d,]+\.?\d*)", text)
         for item in line_pattern:
@@ -215,13 +218,40 @@ async def run_invoice_analysis(envelope: dict) -> None:
             # AI Extraction Execution
             # ---------------------------------------------------------
             
+            all_docs = (await session.execute(select(Document).where(Document.case_id == case_id))).scalars().all()
+            invoice_document = None
+
+            # Find the actual invoice document among attached documents
+            for doc in all_docs:
+                fn_lower = (doc.original_filename or "").lower()
+                if "invoice" in fn_lower or "inv" in fn_lower or "tax" in fn_lower:
+                    invoice_document = doc
+                    break
+
+            if not invoice_document and all_docs:
+                for doc in all_docs:
+                    if not doc.storage_key:
+                        continue
+                    file_path = settings.LOCAL_STORAGE_ROOT / doc.storage_key
+                    if file_path.exists():
+                        try:
+                            import pypdf
+                            text = "\n".join([page.extract_text() or "" for page in pypdf.PdfReader(str(file_path)).pages])
+                            if "INVOICE" in text.upper() or "TAX INVOICE" in text.upper():
+                                invoice_document = doc
+                                break
+                        except Exception:
+                            pass
+
+            if not invoice_document and all_docs:
+                invoice_document = all_docs[-1]
+
             extracted_invoice = None
-            if settings.ALLOW_EXTERNAL_LLM and os.getenv("GEMINI_API_KEY"):
-                try:
-                    document = (await session.execute(select(Document).where(Document.case_id == case_id))).scalars().first()
-                    if document and document.storage_key:
-                        file_path = settings.LOCAL_STORAGE_ROOT / document.storage_key
-                        if file_path.exists():
+            if invoice_document and invoice_document.storage_key:
+                file_path = settings.LOCAL_STORAGE_ROOT / invoice_document.storage_key
+                if file_path.exists():
+                    if settings.ALLOW_EXTERNAL_LLM and os.getenv("GEMINI_API_KEY"):
+                        try:
                             from google import genai
                             from google.genai import types
                             client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
@@ -261,29 +291,22 @@ Output MUST be a valid JSON object matching this schema:
                                 client.files.delete(name=uploaded_file.name)
                             except Exception:
                                 pass
-                except Exception as exc:
-                    logger.warning("External LLM extraction failed, using fallback parsing: %s", exc)
-                    extracted_invoice = None
+                        except Exception as exc:
+                            logger.warning("External LLM extraction failed, using fallback pypdf parsing: %s", exc)
+                            extracted_invoice = None
 
-            if not extracted_invoice:
-                document = (await session.execute(select(Document).where(Document.case_id == case_id))).scalars().first()
-                if document and document.storage_key:
-                    file_path = settings.LOCAL_STORAGE_ROOT / document.storage_key
-                    if file_path.exists():
+                    if not extracted_invoice:
                         extracted_invoice = extract_invoice_from_pdf_file(file_path)
 
             if not extracted_invoice:
-                # Fallback Simulated extracted data
+                logger.warning("No invoice document could be extracted for case %s", case_id)
                 extracted_invoice = {
-                    "invoice_number": "148899",
-                    "vendor_name": "Keells",
-                    "total_amount": 480.00,
-                    "tax_amount": 0.00,
+                    "invoice_number": f"INV-{str(case_id)[:8]}",
+                    "vendor_name": "Unknown Vendor",
+                    "total_amount": 0.0,
+                    "tax_amount": 0.0,
                     "currency": "LKR",
-                    "line_items": [
-                        {"line_number": 1, "description": "119172: CHELLO DRIN YOGHRT BASILSEED VANIL 180ML", "quantity": 1.0, "unit_price": 170.00, "amount": 170.00, "tax_rate": 0.0, "po_line_ref": "1"},
-                        {"line_number": 2, "description": "3292: SCAN JUMBO PEANUT 70G", "quantity": 1.0, "unit_price": 310.00, "amount": 310.00, "tax_rate": 0.0, "po_line_ref": "2"}
-                    ]
+                    "line_items": []
                 }
                 
             # Real 3-Way Match logic comparing Invoice lines vs PO & GRN documents
@@ -440,7 +463,7 @@ Output MUST be a valid JSON object matching this schema:
             # Create EvidenceItem records in database for UI rendering
             session.add(EvidenceItem(
                 tenant_id=tenant_id, case_id=case_id, run_id=run_id,
-                source_type="DOCUMENT_PARSER", source_id=str(document.document_id) if document else "doc-1",
+                source_type="DOCUMENT_PARSER", source_id=str(invoice_document.document_id) if invoice_document else "doc-1",
                 source_locator={"invoice_number": extracted_invoice.get("invoice_number")},
                 claim=f"Extracted invoice {extracted_invoice.get('invoice_number')} from {extracted_invoice.get('vendor_name')} with total amount {extracted_invoice.get('currency', 'LKR')} {extracted_invoice.get('total_amount'):,.2f}.",
                 reason_code="INVOICE_EXTRACTED", confidence=0.95
