@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     )
 
     APP_ENV: Literal["development", "test", "production"] = "development"
+    ALLOW_EXTERNAL_LLM: bool = False
     API_PREFIX: str = "/api/v1"
     LOG_LEVEL: str = "INFO"
     CORS_ORIGINS: str = "http://localhost:3000"

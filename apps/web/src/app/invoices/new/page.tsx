@@ -24,18 +24,22 @@ export default function InvoiceIntake() {
     setBusy(true);
     setError("");
     try {
-      setProgress("Creating invoice exception case…");
+      setProgress("Preparing upload...");
+      const dummyCase = await api.createCase(`Upload for ${invoiceNumber}`, priority);
       
-      // Need to initiate upload with a dummy case to get a document ID first since the API expects document_id
-      // For simplicity in this demo, we'll create a temporary case just for the document, or use the case creation pattern.
-      // Wait, the API for submitInvoice accepts an optional document_id. Let's do it like cases/new where we create a case first, 
-      // but submitInvoice does BOTH. Actually, submitInvoice takes document_id. We need a document_id.
-      // Since initiateUpload requires a case_id, we should adjust how we upload or just submit without it for this MVP and rely on OCR mock.
-      // Wait, the mock invoice extract doesn't need a real document, it uses mock data.
-      
-      const created = await api.submitInvoice(invoiceNumber, undefined, priority, poNumber || undefined);
-      
+      let documentId;
+      for (const [index, file] of files.entries()) {
+        setProgress(`Uploading document: ${file.name}`);
+        const upload = await api.initiateUpload(dummyCase.case_id, file, "INVOICE");
+        await api.uploadContent(upload, file);
+        await api.completeUpload(upload.document_id);
+        documentId = upload.document_id;
+        break; 
+      }
+
       setProgress("Submitting invoice for agent analysis…");
+      const created = await api.submitInvoice(invoiceNumber, documentId, priority, poNumber || undefined);
+      
       router.push(`/cases/${created.case_id}`);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to submit this invoice");
