@@ -1,3 +1,4 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
 docling-slim[standard]==2.113.0
 presidio-analyzer==2.2.363
 pytesseract==0.3.13
