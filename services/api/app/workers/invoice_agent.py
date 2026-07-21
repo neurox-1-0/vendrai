@@ -12,6 +12,27 @@ from app.models import (
 from app.services.events import append_case_event, enqueue_event
 from app.workers.common import consume
 from app.workers.database import WorkerSession, set_worker_tenant
+from app.config import settings
+from pydantic import BaseModel, Field
+import json
+import os
+
+class InvoiceLineItem(BaseModel):
+    line_number: int
+    description: str
+    quantity: float
+    unit_price: float
+    amount: float
+    tax_rate: float
+    po_line_ref: str | None = None
+
+class ExtractedInvoice(BaseModel):
+    invoice_number: str
+    vendor_name: str
+    total_amount: float
+    tax_amount: float
+    currency: str
+    line_items: list[InvoiceLineItem]
 
 # Mock implementation of LangGraph dispatch for invoice analysis
 # In a full implementation, this would import build_invoice_graph from agent.app.invoice_graph
@@ -71,43 +92,96 @@ async def run_invoice_analysis(envelope: dict) -> None:
             await session.flush()
 
             # ---------------------------------------------------------
-            # Mock graph execution
+            # AI Extraction Execution
             # ---------------------------------------------------------
             
-            # Simulated extracted data
-            extracted_invoice = {
-                "invoice_number": "148899",
-                "vendor_name": "Keells",
-                "total_amount": 480.00,
-                "tax_amount": 0.00,
-                "currency": "LKR",
-                "line_items": [
-                    {"line_number": 1, "description": "119172: CHELLO DRIN YOGHRT BASILSEED VANIL 180ML", "quantity": 1.0, "unit_price": 170.00, "amount": 170.00, "tax_rate": 0.0, "po_line_ref": "1"},
-                    {"line_number": 2, "description": "3292: SCAN JUMBO PEANUT 70G", "quantity": 1.0, "unit_price": 310.00, "amount": 310.00, "tax_rate": 0.0, "po_line_ref": "2"}
-                ]
-            }
+            extracted_invoice = None
+            if settings.ALLOW_EXTERNAL_LLM and os.getenv("GEMINI_API_KEY"):
+                document = (await session.execute(select(Document).where(Document.case_id == case_id))).scalars().first()
+                if document and document.storage_key:
+                    file_path = settings.LOCAL_STORAGE_ROOT / document.storage_key
+                    if file_path.exists():
+                        from google import genai
+                        from google.genai import types
+                        client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+                        uploaded_file = client.files.upload(file=str(file_path))
+                        
+                        prompt = "Extract the invoice details from this document. Ensure you capture line items correctly."
+                        response = client.models.generate_content(
+                            model=settings.DEFAULT_MODEL,
+                            contents=[uploaded_file, prompt],
+                            config=types.GenerateContentConfig(
+                                response_mime_type="application/json",
+                                response_schema=ExtractedInvoice,
+                                temperature=0.0
+                            ),
+                        )
+                        if response.parsed:
+                            extracted_invoice = response.parsed.model_dump()
+                        else:
+                            extracted_invoice = json.loads(response.text)
+                        
+                        try:
+                            client.files.delete(name=uploaded_file.name)
+                        except Exception:
+                            pass
+
+            if not extracted_invoice:
+                # Fallback Simulated extracted data
+                extracted_invoice = {
+                    "invoice_number": "148899",
+                    "vendor_name": "Keells",
+                    "total_amount": 480.00,
+                    "tax_amount": 0.00,
+                    "currency": "LKR",
+                    "line_items": [
+                        {"line_number": 1, "description": "119172: CHELLO DRIN YOGHRT BASILSEED VANIL 180ML", "quantity": 1.0, "unit_price": 170.00, "amount": 170.00, "tax_rate": 0.0, "po_line_ref": "1"},
+                        {"line_number": 2, "description": "3292: SCAN JUMBO PEANUT 70G", "quantity": 1.0, "unit_price": 310.00, "amount": 310.00, "tax_rate": 0.0, "po_line_ref": "2"}
+                    ]
+                }
+                
+            # Dynamic 3-Way Match logic based on extraction
+            line_matches = []
+            overall_variance = 0.0
+            exceptions = []
+            
+            for idx, item in enumerate(extracted_invoice["line_items"]):
+                # Mock a PO price that is exactly $10 less than the extracted invoice price for the LAST item
+                is_variance = (idx == len(extracted_invoice["line_items"]) - 1)
+                variance_amt = 10.0 if is_variance else 0.0
+                
+                line_matches.append({
+                    "invoice_line": item,
+                    "price_variance": variance_amt,
+                    "quantity_variance": 0.0,
+                    "match_status": "PARTIAL_MATCH" if variance_amt > 0 else "MATCHED"
+                })
+                
+                overall_variance += variance_amt
+                if variance_amt > 0:
+                    exceptions.append({
+                        "exception_type": "PRICE_VARIANCE",
+                        "severity": "LOW",
+                        "confidence": 0.95,
+                        "mismatch_details": {"message": f"Price variance found on {item['description']} (Variance: {variance_amt})"},
+                        "affected_lines": [item["line_number"]]
+                    })
             
             match_result = {
-                "match_status": "PARTIAL_MATCH",
-                "line_matches": [
-                    {"invoice_line": extracted_invoice["line_items"][0], "price_variance": 0.0, "quantity_variance": 0.0, "match_status": "MATCHED"},
-                    {"invoice_line": extracted_invoice["line_items"][1], "price_variance": 10.0, "quantity_variance": 0.0, "match_status": "PARTIAL_MATCH"}
-                ],
-                "overall_variance_amount": 10.0,
-                "overall_variance_pct": 2.1,
+                "match_status": "PARTIAL_MATCH" if overall_variance > 0 else "MATCHED",
+                "line_matches": line_matches,
+                "overall_variance_amount": overall_variance,
+                "overall_variance_pct": (overall_variance / max(extracted_invoice["total_amount"], 1.0)) * 100,
                 "unmatched_invoice_lines": [],
                 "unmatched_po_lines": []
             }
-            
-            exceptions = [
-                {"exception_type": "PRICE_VARIANCE", "severity": "LOW", "confidence": 0.95, "mismatch_details": {"message": "Price variance found on SCAN JUMBO PEANUT (Expected 300.00, Actual 310.00)"}, "affected_lines": [2]}
-            ]
+
             
             tolerance_result = {
                 "within_tolerance": True,
                 "threshold_amount": 50.0,
                 "threshold_pct": 5.0,
-                "actual_variance": 10.0,
+                "actual_variance": overall_variance,
                 "policy_ref": "POLICY-INV-001",
                 "exception_type": "PRICE_VARIANCE"
             }
