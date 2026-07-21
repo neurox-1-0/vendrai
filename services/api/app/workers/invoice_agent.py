@@ -4,6 +4,7 @@ import logging
 import os
 import uuid
 from datetime import UTC, datetime
+from pathlib import Path
 
 from sqlalchemy import select
 
@@ -69,6 +70,77 @@ async def handle_invoice_submitted(envelope: dict) -> None:
                 await append_case_event(session, tenant_id=tenant_id, case_id=case_id, event_type="RUN_WAITING_FOR_DOCUMENTS", actor_type="SYSTEM", actor_id="invoice-worker", payload={"run_id": str(run_id)})
             
             session.add(InboxReceipt(consumer_name="invoice-worker", event_id=event_id, tenant_id=tenant_id))
+
+
+def extract_invoice_from_pdf_file(pdf_path: Path) -> dict | None:
+    try:
+        import pypdf
+        import re
+        reader = pypdf.PdfReader(str(pdf_path))
+        text = "\n".join([page.extract_text() or "" for page in reader.pages])
+        if not text.strip():
+            return None
+            
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        
+        inv_match = re.search(r"(?:Invoice\s+number|Invoice\s+No\.?|Invoice\s+#|INV)[:\s\n]+([A-Z0-9-]+)", text, re.IGNORECASE)
+        invoice_number = inv_match.group(1).strip() if inv_match else "UNKNOWN-INV"
+        
+        vendor_name = "Vendor"
+        for line in lines[:5]:
+            if line not in ("NO", "AH", "Invoice", "Page 1", "TAX INVOICE") and not line.startswith("http"):
+                vendor_name = line
+                break
+                
+        curr_match = re.search(r"(?:Currency|Total)[:\s\n]+([A-Z]{3})", text, re.IGNORECASE)
+        currency = curr_match.group(1).strip() if curr_match else "LKR"
+        
+        total_amt = 0.0
+        amt_match = re.search(r"(?:Amount due|Total|Subtotal)[:\s\n]+(?:[A-Z]{3}\s+)?([\d,]+\.?\d*)", text, re.IGNORECASE)
+        if amt_match:
+            total_amt = float(amt_match.group(1).replace(",", ""))
+            
+        tax_amt = 0.0
+        tax_match = re.search(r"(?:Tax|VAT)[:\s\(\d%\)\n]+(?:[A-Z]{3}\s+)?([\d,]+\.?\d*)", text, re.IGNORECASE)
+        if tax_match:
+            tax_amt = float(tax_match.group(1).replace(",", ""))
+
+        line_items = []
+        line_pattern = re.findall(r"(\d+)\s*\n\s*([^\n]+)\s*\n\s*(\d+(?:\.\d+)?)\s*\n\s*(?:[A-Z]{3}\s+)?([\d,]+\.?\d*)\s*\n\s*(?:[A-Z]{3}\s+)?([\d,]+\.?\d*)", text)
+        for item in line_pattern:
+            line_num, desc, qty, u_price, total = item
+            line_items.append({
+                "line_number": int(line_num),
+                "description": desc.strip(),
+                "quantity": float(qty),
+                "unit_price": float(u_price.replace(",", "")),
+                "amount": float(total.replace(",", "")),
+                "tax_rate": 0.0,
+                "po_line_ref": str(line_num)
+            })
+            
+        if not line_items:
+            line_items.append({
+                "line_number": 1,
+                "description": f"Invoice Line Item ({invoice_number})",
+                "quantity": 1.0,
+                "unit_price": total_amt or 100.0,
+                "amount": total_amt or 100.0,
+                "tax_rate": 0.0,
+                "po_line_ref": "1"
+            })
+
+        return {
+            "invoice_number": invoice_number,
+            "vendor_name": vendor_name,
+            "total_amount": total_amt or sum(item["amount"] for item in line_items),
+            "tax_amount": tax_amt,
+            "currency": currency,
+            "line_items": line_items
+        }
+    except Exception as exc:
+        logger.warning("Local pypdf extraction exception: %s", exc)
+        return None
 
 
 async def run_invoice_analysis(envelope: dict) -> None:
@@ -149,6 +221,13 @@ Output MUST be a valid JSON object matching this schema:
                 except Exception as exc:
                     logger.warning("External LLM extraction failed, using fallback parsing: %s", exc)
                     extracted_invoice = None
+
+            if not extracted_invoice:
+                document = (await session.execute(select(Document).where(Document.case_id == case_id))).scalars().first()
+                if document and document.storage_key:
+                    file_path = settings.LOCAL_STORAGE_ROOT / document.storage_key
+                    if file_path.exists():
+                        extracted_invoice = extract_invoice_from_pdf_file(file_path)
 
             if not extracted_invoice:
                 # Fallback Simulated extracted data
