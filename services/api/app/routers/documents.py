@@ -80,7 +80,7 @@ async def upload_content(document_id: uuid.UUID, request: Request, db: Db, princ
         raise HTTPException(422, detail={"code": "CONTENT_LENGTH_MISMATCH", "expected": document.size_bytes, "actual": stored.size_bytes})
     document.sha256 = stored.sha256
     document.processing_status = "QUARANTINED"
-    document.upload_token_hash = "consumed:" + document.upload_token_hash
+    document.upload_token_hash = "consumed:" + document.upload_token_hash[:54]
     return document
 
 

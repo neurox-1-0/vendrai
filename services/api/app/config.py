@@ -18,6 +18,7 @@ class Settings(BaseSettings):
 
     APP_ENV: Literal["development", "test", "production"] = "development"
     ALLOW_EXTERNAL_LLM: bool = False
+    DEFAULT_MODEL: str = "gemini-2.5-flash"
     API_PREFIX: str = "/api/v1"
     LOG_LEVEL: str = "INFO"
     CORS_ORIGINS: str = "http://localhost:3000"
