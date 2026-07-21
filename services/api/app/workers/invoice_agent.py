@@ -97,16 +97,17 @@ async def run_invoice_analysis(envelope: dict) -> None:
             
             extracted_invoice = None
             if settings.ALLOW_EXTERNAL_LLM and os.getenv("GEMINI_API_KEY"):
-                document = (await session.execute(select(Document).where(Document.case_id == case_id))).scalars().first()
-                if document and document.storage_key:
-                    file_path = settings.LOCAL_STORAGE_ROOT / document.storage_key
-                    if file_path.exists():
-                        from google import genai
-                        from google.genai import types
-                        client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
-                        uploaded_file = client.files.upload(path=str(file_path))
-                        
-                        prompt = """Extract the invoice details from this document. Ensure you capture line items correctly.
+                try:
+                    document = (await session.execute(select(Document).where(Document.case_id == case_id))).scalars().first()
+                    if document and document.storage_key:
+                        file_path = settings.LOCAL_STORAGE_ROOT / document.storage_key
+                        if file_path.exists():
+                            from google import genai
+                            from google.genai import types
+                            client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+                            uploaded_file = client.files.upload(path=str(file_path))
+                            
+                            prompt = """Extract the invoice details from this document. Ensure you capture line items correctly.
 Output MUST be a valid JSON object matching this schema:
 {
   "invoice_number": "string",
@@ -126,20 +127,23 @@ Output MUST be a valid JSON object matching this schema:
     }
   ]
 }"""
-                        response = client.models.generate_content(
-                            model=settings.DEFAULT_MODEL,
-                            contents=[uploaded_file, prompt],
-                            config=types.GenerateContentConfig(
-                                response_mime_type="application/json",
-                                temperature=0.0
-                            ),
-                        )
-                        extracted_invoice = json.loads(response.text)
+                            response = client.models.generate_content(
+                                model=settings.DEFAULT_MODEL,
+                                contents=[uploaded_file, prompt],
+                                config=types.GenerateContentConfig(
+                                    response_mime_type="application/json",
+                                    temperature=0.0
+                                ),
+                            )
+                            extracted_invoice = json.loads(response.text)
 
-                        try:
-                            client.files.delete(name=uploaded_file.name)
-                        except Exception:
-                            pass
+                            try:
+                                client.files.delete(name=uploaded_file.name)
+                            except Exception:
+                                pass
+                except Exception as exc:
+                    logger.warning("External LLM extraction failed, using fallback parsing: %s", exc)
+                    extracted_invoice = None
 
             if not extracted_invoice:
                 # Fallback Simulated extracted data
