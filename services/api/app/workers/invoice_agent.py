@@ -1,4 +1,7 @@
 import asyncio
+import json
+import logging
+import os
 import uuid
 from datetime import UTC, datetime
 
@@ -14,8 +17,8 @@ from app.workers.common import consume
 from app.workers.database import WorkerSession, set_worker_tenant
 from app.config import settings
 from pydantic import BaseModel, Field
-import json
-import os
+
+logger = logging.getLogger(__name__)
 
 class InvoiceLineItem(BaseModel):
     line_number: int
@@ -83,7 +86,9 @@ async def run_invoice_analysis(envelope: dict) -> None:
             case = await session.get(Case, case_id, with_for_update=True)
             run = await session.get(AgentRun, run_id, with_for_update=True)
             if not case or case.tenant_id != tenant_id or not run:
-                raise RuntimeError("CASE_OR_RUN_NOT_FOUND")
+                logger.warning("Skipping orphaned event %s: case=%s run=%s", event_id, case_id, run_id)
+                session.add(InboxReceipt(consumer_name="invoice-worker", event_id=event_id, tenant_id=tenant_id))
+                return
                 
             run.status = "RUNNING"
             run.current_node = "invoice_specialist_analysis"
