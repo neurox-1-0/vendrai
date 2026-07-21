@@ -54,6 +54,7 @@ async def submit_invoice(
         actor_type="USER", actor_id=str(user_id),
         payload={"case_type": "INVOICE_EXCEPTION", "title": case.title, "invoice_number": request.invoice_number}
     )
+    await session.flush()
     
     if request.document_id:
         document = await session.get(Document, request.document_id)
