@@ -74,7 +74,10 @@ async def decide_approval(
         assert_transition(case.status, CaseStatus.APPROVED)
         case.status = CaseStatus.APPROVED
         event_type = "approval.approved.v1"
-        next_event = "erp.sync.requested.v1"
+        if task.task_type in ("INVOICE_EXCEPTION_RESOLUTION", "TAX_REVIEW", "PROCUREMENT_REVIEW", "INVOICE_AP_APPROVAL", "DUPLICATE_REVIEW"):
+            next_event = "invoice.resolution.approved.v1"
+        else:
+            next_event = "erp.sync.requested.v1"
         next_status = CaseStatus.ERP_SYNC_PENDING
     elif body.decision == "REJECTED":
         assert_transition(case.status, CaseStatus.REJECTED)

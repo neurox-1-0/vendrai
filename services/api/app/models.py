@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Index, Integer, LargeBinary, String, Text, UniqueConstraint, func
+from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, Index, Integer, LargeBinary, Numeric, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import JSON, Uuid
@@ -50,6 +50,20 @@ class Vendor(Base, TimestampMixin):
     registered_country: Mapped[str | None] = mapped_column(String(2))
     status: Mapped[str] = mapped_column(String(32), default="PROPOSED")
     erp_vendor_id: Mapped[str | None] = mapped_column(Text)
+
+
+class InvoiceHistoryRecord(Base, TimestampMixin):
+    __tablename__ = "invoice_history"
+    __table_args__ = (UniqueConstraint("tenant_id", "vendor_id", "invoice_number"),)
+    record_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.tenant_id"), index=True)
+    vendor_id: Mapped[str] = mapped_column(String(50), index=True)
+    invoice_number: Mapped[str] = mapped_column(String(120), index=True)
+    invoice_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    gross_amount: Mapped[float] = mapped_column(Float, default=0.0)
+    currency: Mapped[str] = mapped_column(String(3), default="LKR")
+    po_number: Mapped[str | None] = mapped_column(String(80))
+    status: Mapped[str] = mapped_column(String(32), default="PAID")
 
 
 class Case(Base, TimestampMixin):
