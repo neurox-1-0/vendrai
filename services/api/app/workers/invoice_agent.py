@@ -194,8 +194,29 @@ def extract_po_and_grn_from_documents(documents: list) -> tuple[dict, dict]:
             import re
             reader = pypdf.PdfReader(str(file_path))
             text = "\n".join([page.extract_text() or "" for page in reader.pages])
+            text_upper = text.upper()
             
-            if "PURCHASE ORDER" in text:
+            is_grn = "GOODS RECEIPT" in text_upper or "GRN-" in text_upper
+            is_invoice = "TAX INVOICE" in text_upper or "AMOUNT DUE" in text_upper or "BILL TO" in text_upper or "REMITTANCE DETAILS" in text_upper
+            is_po = ("PURCHASE ORDER" in text_upper or "ORDER DATE" in text_upper) and not is_grn and not is_invoice
+
+            if is_grn:
+                grn_num_match = re.search(r"(?:Receipt\s+number|GRN)[:\s\n]+([A-Z0-9-]+)", text, re.IGNORECASE)
+                if grn_num_match:
+                    grn_data["grn_number"] = grn_num_match.group(1).strip()
+
+                lines = re.findall(r"(\d+)\s*\n\s*([^\n]+)\s*\n\s*(\d+(?:\.\d+)?)\s*\n\s*(\d+(?:\.\d+)?)", text)
+                if not lines:
+                    lines = re.findall(r"(\d+)\s+([A-Za-z0-9,\.\s\(\)\/-]+?)\s+(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)", text)
+
+                for item in lines:
+                    l_num, desc, ordered, received = item
+                    grn_data["lines"][int(l_num)] = {
+                        "description": desc.strip(),
+                        "ordered": float(ordered),
+                        "received": float(received)
+                    }
+            elif is_po:
                 po_num_match = re.search(r"(?:PO\s+Number|PO\s+#|Purchase\s+Order)[:\s\n]+([A-Z0-9-]+)", text, re.IGNORECASE)
                 if po_num_match:
                     po_data["po_number"] = po_num_match.group(1).strip()
@@ -215,18 +236,6 @@ def extract_po_and_grn_from_documents(documents: list) -> tuple[dict, dict]:
                         "quantity": float(qty),
                         "unit_price": float(u_price.replace(",", "")),
                         "amount": float(total.replace(",", ""))
-                    }
-            elif "GOODS RECEIPT" in text or "GRN" in text:
-                lines = re.findall(r"(\d+)\s*\n\s*([^\n]+)\s*\n\s*(\d+(?:\.\d+)?)\s*\n\s*(\d+(?:\.\d+)?)", text)
-                if not lines:
-                    lines = re.findall(r"(\d+)\s+([A-Za-z0-9,\.\s\(\)\/-]+?)\s+(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)", text)
-
-                for item in lines:
-                    l_num, desc, ordered, received = item
-                    grn_data["lines"][int(l_num)] = {
-                        "description": desc.strip(),
-                        "ordered": float(ordered),
-                        "received": float(received)
                     }
         except Exception as exc:
             logger.warning("Error reading doc for PO/GRN: %s", exc)

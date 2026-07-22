@@ -28,18 +28,28 @@ export default function InvoiceIntake() {
       const dummyCase = await api.createCase(`Upload for ${invoiceNumber}`, priority);
       await new Promise(resolve => setTimeout(resolve, 500)); // Wait for backend transaction to commit
       
-      let documentId;
-      for (const [index, file] of files.entries()) {
+      const documentIds: string[] = [];
+      for (const file of files) {
         setProgress(`Uploading document: ${file.name}`);
-        const upload = await api.initiateUpload(dummyCase.case_id, file, "INVOICE");
+        const fnLower = file.name.toLowerCase();
+        const documentType = (fnLower.includes("po") || fnLower.includes("purchase")) ? "PURCHASE_ORDER"
+                           : (fnLower.includes("grn") || fnLower.includes("receipt")) ? "GOODS_RECEIPT"
+                           : "INVOICE";
+        const upload = await api.initiateUpload(dummyCase.case_id, file, documentType);
         await api.uploadContent(upload, file);
         await api.completeUpload(upload.document_id);
-        documentId = upload.document_id;
-        break; 
+        documentIds.push(upload.document_id);
       }
 
       setProgress("Submitting invoice for agent analysis…");
-      const created = await api.submitInvoice(invoiceNumber, documentId, priority, poNumber || undefined);
+      const created = await api.submitInvoice(
+        invoiceNumber,
+        documentIds[0],
+        priority,
+        poNumber || undefined,
+        undefined,
+        documentIds
+      );
       
       router.push(`/cases/${created.case_id}`);
     } catch (caught) {

@@ -182,11 +182,18 @@ export const api = {
       headers: { "Idempotency-Key": idempotencyKey("case") },
       body: JSON.stringify({ title, priority }),
     }),
-  submitInvoice: (invoice_number: string, document_id?: string, priority: VendorCase["priority"] = "NORMAL", po_number?: string, vendor_id?: string) =>
+  submitInvoice: (
+    invoice_number: string,
+    document_id?: string,
+    priority: VendorCase["priority"] = "NORMAL",
+    po_number?: string,
+    vendor_id?: string,
+    document_ids?: string[]
+  ) =>
     request<AcceptedAction>("/invoices", {
       method: "POST",
       headers: { "Idempotency-Key": idempotencyKey("invoice") },
-      body: JSON.stringify({ invoice_number, document_id, priority, po_number, vendor_id }),
+      body: JSON.stringify({ invoice_number, document_id, document_ids: document_ids || [], priority, po_number, vendor_id }),
     }),
   initiateUpload: (caseId: string, file: File, documentType: string) =>
     request<InitiatedUpload>(`/cases/${caseId}/documents:initiate`, {

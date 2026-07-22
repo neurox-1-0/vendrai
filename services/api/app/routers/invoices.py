@@ -56,13 +56,17 @@ async def submit_invoice(
     )
     await session.flush()
     
+    target_doc_ids = set(request.document_ids or [])
     if request.document_id:
-        document = await session.get(Document, request.document_id)
+        target_doc_ids.add(request.document_id)
+        
+    for doc_id in target_doc_ids:
+        document = await session.get(Document, doc_id)
         if document and document.tenant_id == tenant_id:
             document.case_id = case_id
             await append_case_event(
                 session, tenant_id=tenant_id, case_id=case_id, event_type="DOCUMENT_ATTACHED",
-                actor_type="USER", actor_id=str(user_id), payload={"document_id": str(request.document_id)}
+                actor_type="USER", actor_id=str(user_id), payload={"document_id": str(doc_id)}
             )
             
     enqueue_event(

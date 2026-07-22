@@ -179,6 +179,7 @@ class ClarificationResponseRequest(BaseModel):
 class InvoiceSubmissionRequest(BaseModel):
     invoice_number: str = Field(min_length=1, max_length=50)
     document_id: UUID | None = None
+    document_ids: list[UUID] = Field(default_factory=list)
     priority: Literal["LOW", "NORMAL", "HIGH", "URGENT"] = "NORMAL"
     po_number: str | None = Field(default=None, max_length=50)
     vendor_id: UUID | None = None
