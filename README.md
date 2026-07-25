@@ -13,21 +13,27 @@ NeuroX currently contains an evidence-driven supplier-onboarding platform and a 
 - `invoice-worker`: local extraction, PO/GRN matching, policy evidence and invoice approval interruption.
 - `notification-worker`: independent in-app/email delivery and delayed retries.
 - `erp-worker` / `mock-erp`: evidence-bound, idempotent vendor creation.
+- `opa`: fail-closed authorization for every ERP write using state, evidence,
+  version, segregation-of-duties and mandatory-review facts.
 
 PostgreSQL is authoritative. RabbitMQ quorum queues carry versioned events. Qdrant is a derived tenant-filtered policy index. Redis is limited to cache/coordination. Documents remain local.
 
 ## Local setup
 
-Requirements: Docker Compose, Node.js 22.17+ and Python 3.12+.
+Requirements: Docker Compose, Node.js 22.18+ and Python 3.12+.
 
 ```bash
 cp .env.example .env
 ```
 
-Replace every `CHANGE_ME` value with independently generated secrets. External LLM calls are disabled by default and are not required for the deterministic onboarding or invoice paths. Invoice processing reads only locally extracted and masked page text; it does not upload source documents to Gemini.
+Replace every `CHANGE_ME` value with independently generated secrets. P0/P1
+acceptance requires `AUTH_MODE=keycloak`, `ALLOW_EXTERNAL_LLM=true`,
+`DEFAULT_MODEL=gemini-3.6-flash`, and synthetic-only test data. Invoice
+processing reads only locally extracted and masked page text; it never uploads
+source documents to Gemini.
 
 ```bash
-docker compose up --build
+docker compose --profile acceptance up --build
 ```
 
 Open:
@@ -37,19 +43,17 @@ Open:
 - Keycloak: <http://localhost:8080>
 - Mailpit: <http://localhost:8025>
 
-The default Compose profile uses development identity unless `AUTH_MODE=keycloak` is set. For Keycloak mode, create users in the imported `neurox` realm, assign one or more realm roles, and keep PKCE enabled. Production configuration is rejected if development authentication or placeholder service credentials remain.
+The acceptance profile bootstraps synthetic users from secrets in `.env`; it
+does not commit passwords. The default profile may use development identity
+only for isolated developer work. Production configuration is rejected if
+development authentication or placeholder service credentials remain.
 
 ## Local verification without containers
 
 ```bash
 cd services/api
 python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
-.venv/bin/pytest -q
-
-cd ../../services/agent
-python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
+.venv/bin/pip install -r requirements-dev.txt
 .venv/bin/pytest -q
 
 cd ../../apps/web
@@ -63,19 +67,45 @@ npm run build
 
 Create and publish tenant policies through `/api/v1/knowledge/documents`. Publication emits an indexing event; retrieval enforces tenant, role, publication and effective-date filters before ranking.
 
-Official sanctions files are not bundled. Normalize an approved official export to `external_id,name,aliases,countries`, verify its checksum and import it locally:
+Official sanctions files are not bundled. An administrator requests imports
+through `POST /api/v1/admin/sanctions-imports`; the dedicated worker downloads
+only allowlisted official HTTPS sources, validates size/XML safety and records
+URL, ETag, checksum, publication time and version before publication. The
+workflow requires current OFAC, UN and EU datasets and fails closed if any are
+missing or stale.
+
+For a checksum-approved normalized offline import, use:
 
 ```bash
 cd services/api
 .venv/bin/python scripts/import_sanctions.py \
   --source OFAC \
   --version 2026-07-19 \
-  --source-url https://example.invalid/replace-with-approved-official-url \
+  --source-url https://ofac.treasury.gov/replace-with-approved-official-export \
   --file /approved/path/ofac.csv \
   --sha256 REPLACE_WITH_APPROVED_SHA256
 ```
 
 If sanctions or applicable policy data is unavailable, analysis fails closed into a visible verification state.
+
+## Backup and acceptance
+
+PostgreSQL WAL archiving and pgBackRest use the isolated `neurox-backups`
+bucket and separate MinIO credentials. Follow
+[`docs/backup-restore-runbook.md`](./docs/backup-restore-runbook.md) and restore
+only into a new isolated volume.
+
+The complete acceptance stack needs at least 8 CPUs, 16 GB RAM and roughly
+50 GB free disk:
+
+```bash
+docker compose --profile acceptance up --build
+```
+
+Before running it, set `AUTH_MODE=keycloak`, keep all test data synthetic, set
+`ALLOW_EXTERNAL_LLM=true`, configure the server-side `GEMINI_API_KEY`, and
+replace every `CHANGE_ME` secret. Never put credentials in source control or
+chat.
 
 ## Release truth
 
