@@ -39,16 +39,20 @@ class Settings(BaseSettings):
     QDRANT_URL: str = "http://localhost:6333"
     QDRANT_API_KEY: str = ""
     RETRIEVAL_URL: str = "http://retrieval-api:8100"
+    OPA_URL: str = "http://opa:8181"
 
     STORAGE_BACKEND: Literal["local", "s3"] = "local"
     LOCAL_STORAGE_ROOT: Path = Path("../../.data/object-store")
     S3_ENDPOINT_URL: str = "http://localhost:9000"
+    S3_PUBLIC_ENDPOINT_URL: str = "http://localhost:9000"
     S3_ACCESS_KEY: str = ""
     S3_SECRET_KEY: str = ""
+    S3_REGION: str = "us-east-1"
     S3_QUARANTINE_BUCKET: str = "neurox-quarantine"
     S3_DOCUMENT_BUCKET: str = "neurox-documents"
     UPLOAD_TOKEN_SECRET: str = "development-only-change-me"
     MAX_UPLOAD_BYTES: int = 25 * 1024 * 1024
+    MAX_PDF_PAGES: int = 100
     UPLOAD_URL_TTL_SECONDS: int = 900
 
     CLAMAV_HOST: str = "localhost"
@@ -57,20 +61,47 @@ class Settings(BaseSettings):
     DOCUMENT_PROCESSOR: Literal["docling", "native"] = "native"
     OCR_PRIMARY: str = "tesseract"
     OCR_FALLBACK: str = "easyocr"
+    OCR_MIN_NATIVE_CHARACTERS: int = 40
+    OCR_MIN_CONFIDENCE: float = 0.60
 
     GEMINI_API_KEY: str = ""
-    DEFAULT_MODEL: str = "gemini-2.5-flash"
+    DEFAULT_MODEL: str = "gemini-3.6-flash"
     ALLOW_EXTERNAL_LLM: bool = False
     ALLOW_SYNTHETIC_LLM_DATA_ONLY: bool = True
+    LLM_DATA_CLASSIFICATION: Literal["SYNTHETIC", "TOKENIZED"] = "SYNTHETIC"
+    LLM_MAX_ATTEMPTS: int = 3
+    LLM_TIMEOUT_SECONDS: int = 45
+    LLM_CONCURRENCY: int = 4
+    LLM_CIRCUIT_FAILURE_THRESHOLD: int = 5
+    LLM_CIRCUIT_RESET_SECONDS: int = 120
     DATA_ENCRYPTION_SECRET: str = "development-encryption-secret-change-me"
     BLIND_INDEX_SECRET: str = "development-blind-index-secret-change-me"
 
     SMTP_HOST: str = "localhost"
     SMTP_PORT: int = 1025
     SMTP_FROM: str = "notifications@neurox.local"
+    SMTP_USERNAME: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_STARTTLS: bool = False
+    SMTP_USE_SSL: bool = False
     MOCK_ERP_URL: str = "http://mock-erp:8090"
 
     OTEL_EXPORTER_OTLP_ENDPOINT: str = "http://localhost:4318"
+    OTEL_SERVICE_NAME: str = "neurox-api"
+    OTEL_ENABLED: bool = False
+    RATE_LIMIT_ENABLED: bool = True
+    RATE_LIMIT_REQUESTS: int = 120
+    RATE_LIMIT_WINDOW_SECONDS: int = 60
+    SANCTIONS_MAX_AGE_HOURS: int = 36
+    SANCTIONS_DOWNLOAD_MAX_BYTES: int = 64 * 1024 * 1024
+    SANCTIONS_OFAC_URL: str = (
+        "https://sanctionslistservice.ofac.treas.gov/api/"
+        "PublicationPreview/exports/SDN.XML"
+    )
+    SANCTIONS_UN_URL: str = (
+        "https://scsanctions.un.org/resources/xml/en/consolidated.xml"
+    )
+    SANCTIONS_EU_URL: str = ""
 
     @model_validator(mode="after")
     def reject_unsafe_production_configuration(self) -> "Settings":
@@ -80,6 +111,8 @@ class Settings(BaseSettings):
         weak_markers = ("change-me", "change_me", "changeme")
         if self.AUTH_MODE != "keycloak":
             problems.append("AUTH_MODE must be keycloak")
+        if self.STORAGE_BACKEND != "s3":
+            problems.append("STORAGE_BACKEND must be s3")
         if any(marker in self.DATABASE_URL.lower() or marker in self.RABBITMQ_URL.lower() for marker in weak_markers):
             problems.append("default database or broker credentials are forbidden")
         if len(self.UPLOAD_TOKEN_SECRET) < 32 or any(marker in self.UPLOAD_TOKEN_SECRET.lower() for marker in weak_markers):
@@ -88,6 +121,17 @@ class Settings(BaseSettings):
             problems.append("data protection secrets must be rotated")
         if self.ALLOW_EXTERNAL_LLM and not self.GEMINI_API_KEY:
             problems.append("external LLM is enabled without a provider credential")
+        if self.DEFAULT_MODEL != "gemini-3.6-flash":
+            problems.append("DEFAULT_MODEL must be pinned to gemini-3.6-flash")
+        if (
+            self.ALLOW_EXTERNAL_LLM
+            and self.LLM_DATA_CLASSIFICATION != "TOKENIZED"
+        ):
+            problems.append(
+                "production external LLM payloads must be TOKENIZED"
+            )
+        if self.SMTP_STARTTLS and self.SMTP_USE_SSL:
+            problems.append("SMTP_STARTTLS and SMTP_USE_SSL are mutually exclusive")
         if problems:
             raise ValueError("Unsafe production configuration: " + "; ".join(problems))
         return self

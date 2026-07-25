@@ -7,7 +7,6 @@ from pathlib import Path
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
-
 app = FastAPI(title="NeuroX Simulated ERP", version="1.0.0")
 DB_PATH = Path(os.getenv("ERP_DB_PATH", "/data/mock-erp.sqlite"))
 
@@ -33,13 +32,22 @@ def create_vendor(body: VendorCreate, idempotency_key: str = Header(alias="Idemp
         raise HTTPException(400, detail={"code": "IDEMPOTENCY_KEY_REQUIRED"})
     db = connection()
     try:
-        existing = db.execute("SELECT erp_vendor_id FROM vendor_writes WHERE idempotency_key = ?", (idempotency_key,)).fetchone()
+        payload = json.dumps(body.model_dump(), sort_keys=True)
+        existing = db.execute(
+            "SELECT erp_vendor_id, payload FROM vendor_writes WHERE idempotency_key = ?",
+            (idempotency_key,),
+        ).fetchone()
         if existing:
+            if existing[1] != payload:
+                raise HTTPException(
+                    409,
+                    detail={"code": "IDEMPOTENCY_KEY_REUSED"},
+                )
             return {"erp_vendor_id": existing[0], "idempotent_replay": True}
         erp_vendor_id = "ERP-" + hashlib.sha256(idempotency_key.encode()).hexdigest()[:10].upper()
         db.execute(
             "INSERT INTO vendor_writes(idempotency_key, erp_vendor_id, payload) VALUES (?, ?, ?)",
-            (idempotency_key, erp_vendor_id, json.dumps(body.model_dump(), sort_keys=True)),
+            (idempotency_key, erp_vendor_id, payload),
         )
         db.commit()
         return {"erp_vendor_id": erp_vendor_id, "idempotent_replay": False}
@@ -53,13 +61,22 @@ def resolve_invoice_exception(case_id: str, body: dict, idempotency_key: str = H
         raise HTTPException(400, detail={"code": "IDEMPOTENCY_KEY_REQUIRED"})
     db = connection()
     try:
-        existing = db.execute("SELECT resolution_id FROM invoice_resolutions WHERE idempotency_key = ?", (idempotency_key,)).fetchone()
+        payload = json.dumps(body, sort_keys=True)
+        existing = db.execute(
+            "SELECT resolution_id, case_id, payload FROM invoice_resolutions WHERE idempotency_key = ?",
+            (idempotency_key,),
+        ).fetchone()
         if existing:
+            if existing[1] != case_id or existing[2] != payload:
+                raise HTTPException(
+                    409,
+                    detail={"code": "IDEMPOTENCY_KEY_REUSED"},
+                )
             return {"resolution_id": existing[0], "idempotent_replay": True}
         resolution_id = "RES-" + hashlib.sha256(idempotency_key.encode()).hexdigest()[:10].upper()
         db.execute(
             "INSERT INTO invoice_resolutions(idempotency_key, resolution_id, case_id, payload) VALUES (?, ?, ?, ?)",
-            (idempotency_key, resolution_id, case_id, json.dumps(body, sort_keys=True)),
+            (idempotency_key, resolution_id, case_id, payload),
         )
         db.commit()
         return {"resolution_id": resolution_id, "idempotent_replay": False}

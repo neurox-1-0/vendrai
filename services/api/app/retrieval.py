@@ -7,7 +7,6 @@ from qdrant_client import QdrantClient, models
 
 from app.config import settings
 
-
 COLLECTION = "policy_chunks_v1"
 
 

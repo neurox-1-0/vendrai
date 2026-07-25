@@ -1,13 +1,12 @@
 import hashlib
 import hmac
 import json
+import os
 import re
 import unicodedata
-import os
 from typing import Any
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-
 
 LEGAL_SUFFIXES = re.compile(r"\b(llc|inc|incorporated|ltd|limited|plc|pvt|private|corp|corporation|company|co)\b", re.I)
 

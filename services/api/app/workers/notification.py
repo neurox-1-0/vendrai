@@ -4,13 +4,12 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from email.message import EmailMessage
 
-from sqlalchemy import select
-
 from app.config import settings
 from app.models import InboxReceipt, Notification, NotificationDelivery, User
 from app.services.events import enqueue_event
 from app.workers.common import consume
 from app.workers.database import WorkerSession, set_worker_tenant
+from sqlalchemy import select
 
 
 def mask_email(email: str) -> str:
@@ -24,8 +23,30 @@ def send_email(destination: str, title: str, body: str) -> None:
     message["To"] = destination
     message["Subject"] = title
     message.set_content(body)
-    with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=20) as client:
+    client_type = smtplib.SMTP_SSL if settings.SMTP_USE_SSL else smtplib.SMTP
+    with client_type(settings.SMTP_HOST, settings.SMTP_PORT, timeout=20) as client:
+        if settings.SMTP_STARTTLS:
+            client.ehlo()
+            client.starttls()
+            client.ehlo()
+        if settings.SMTP_USERNAME:
+            client.login(settings.SMTP_USERNAME, settings.SMTP_PASSWORD)
         client.send_message(message)
+
+
+def probe_smtp() -> dict[str, str]:
+    client_type = smtplib.SMTP_SSL if settings.SMTP_USE_SSL else smtplib.SMTP
+    try:
+        with client_type(settings.SMTP_HOST, settings.SMTP_PORT, timeout=10) as client:
+            if settings.SMTP_STARTTLS:
+                client.ehlo()
+                client.starttls()
+                client.ehlo()
+            if settings.SMTP_USERNAME:
+                client.login(settings.SMTP_USERNAME, settings.SMTP_PASSWORD)
+        return {"status": "HEALTHY"}
+    except Exception:
+        return {"status": "UNAVAILABLE", "error_code": "SMTP_UNAVAILABLE"}
 
 
 async def deliver(envelope: dict) -> None:
@@ -47,6 +68,7 @@ async def deliver(envelope: dict) -> None:
             recipients = [user for user in users if (user_id and str(user.user_id) == user_id) or (target_role and (target_role in user.roles or "admin" in user.roles))]
             if not recipients:
                 notification.status = "DELIVERY_SKIPPED"
+            delivery_statuses: list[str] = []
             for user in recipients:
                 delivery = NotificationDelivery(
                     tenant_id=tenant_id, notification_id=notification_id, channel="EMAIL",
@@ -56,9 +78,11 @@ async def deliver(envelope: dict) -> None:
                 try:
                     await asyncio.to_thread(send_email, user.email, notification.title, notification.body)
                     delivery.status = "DELIVERED"
+                    delivery_statuses.append("DELIVERED")
                     delivery.delivered_at = datetime.now(UTC)
                 except Exception as exc:
                     delivery.status = "FAILED"
+                    delivery_statuses.append("FAILED")
                     delivery.last_error = f"{type(exc).__name__}: {exc}"[:2000]
                     if attempt < 5:
                         retry = enqueue_event(
@@ -68,6 +92,13 @@ async def deliver(envelope: dict) -> None:
                             payload={"notification_id": str(notification_id), "user_id": str(user.user_id), "attempt": attempt + 1},
                         )
                         retry.available_at = datetime.now(UTC) + timedelta(seconds=min(2 ** attempt * 15, 900))
+            if delivery_statuses:
+                if all(item == "DELIVERED" for item in delivery_statuses):
+                    notification.status = "DELIVERED"
+                elif attempt < 5:
+                    notification.status = "RETRYING"
+                else:
+                    notification.status = "DELIVERY_FAILED"
             session.add(InboxReceipt(consumer_name="notification-worker", event_id=event_id, tenant_id=tenant_id))
 
 

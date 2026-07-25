@@ -6,8 +6,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 import httpx
-from sqlalchemy import delete, func, select
-
+from app.agents.workflow import tenant_workflow, workflow_config
 from app.config import settings
 from app.domain.cases import CaseStatus
 from app.domain.security import canonical_hash, normalize_vendor_name
@@ -34,7 +33,7 @@ from app.models import (
 from app.services.events import append_audit, append_case_event, enqueue_event
 from app.workers.common import consume
 from app.workers.database import WorkerSession, set_worker_tenant
-
+from sqlalchemy import delete, func, select
 
 INVOICE_NUMBER = re.compile(
     r"(?:invoice\s+(?:number|no\.?|#)|tax\s+invoice\s+no|inv)[:\s]+([A-Z0-9][A-Z0-9./-]{2,})",
@@ -203,6 +202,41 @@ async def _document_text(session, document_id: uuid.UUID) -> str:
         )
     ).scalars().all()
     return "\n".join(page.text_content or "" for page in pages)
+
+
+async def _verified_invoice_corrections(
+    session,
+    document_id: uuid.UUID,
+) -> str:
+    fields = (
+        await session.execute(
+            select(ExtractedField).where(
+                ExtractedField.document_id == document_id,
+                ExtractedField.human_verified.is_(True),
+                ExtractedField.field_name.in_(
+                    {
+                        "invoice_number",
+                        "total_amount",
+                        "currency",
+                        "po_reference",
+                        "po_number",
+                    }
+                ),
+            )
+        )
+    ).scalars().all()
+    labels = {
+        "invoice_number": "INVOICE NUMBER",
+        "total_amount": "INVOICE TOTAL",
+        "currency": "CURRENCY",
+        "po_reference": "PO NUMBER",
+        "po_number": "PO NUMBER",
+    }
+    return "\n".join(
+        f"{labels[field.field_name]}: {field.normalized_value}"
+        for field in fields
+        if field.normalized_value
+    )
 
 
 def detect_document_type(text: str) -> str | None:
@@ -546,6 +580,12 @@ async def run_invoice_analysis(envelope: dict[str, Any]) -> None:
                 return
 
             invoice_document, invoice_text = classified["INVOICE"][0]
+            verified_corrections = await _verified_invoice_corrections(
+                session,
+                invoice_document.document_id,
+            )
+            if verified_corrections:
+                invoice_text = f"{invoice_text}\n{verified_corrections}"
             extracted_invoice, missing_fields = extract_invoice_from_text(invoice_text)
             if not extracted_invoice:
                 await _request_clarification(
@@ -829,7 +869,7 @@ async def run_invoice_analysis(envelope: dict[str, Any]) -> None:
             }
             evidence_hash = canonical_hash(packet)
 
-            session.add(
+            evidence_rows = [
                 EvidenceItem(
                     tenant_id=tenant_id,
                     case_id=case_id,
@@ -843,9 +883,7 @@ async def run_invoice_analysis(envelope: dict[str, Any]) -> None:
                     ),
                     reason_code="INVOICE_EXTRACTED",
                     confidence=0.85,
-                )
-            )
-            session.add(
+                ),
                 EvidenceItem(
                     tenant_id=tenant_id,
                     case_id=case_id,
@@ -859,8 +897,9 @@ async def run_invoice_analysis(envelope: dict[str, Any]) -> None:
                     claim=f"Three-way match disposition: {match_result['match_status']}.",
                     reason_code=match_result["match_status"],
                     confidence=1.0,
-                )
-            )
+                ),
+            ]
+            session.add_all(evidence_rows)
             for exception in exceptions:
                 session.add(
                     InvoiceException(
@@ -880,7 +919,125 @@ async def run_invoice_analysis(envelope: dict[str, Any]) -> None:
                     )
                 )
 
-            if missing_po or not vendor:
+            await session.flush()
+            graph_packet = {
+                "_data_classification": settings.LLM_DATA_CLASSIFICATION,
+                "recommendation": recommendation,
+                "reason_codes": reason_codes,
+                "unresolved_items": packet["unresolved_items"],
+                "deterministic_checks": {
+                    "duplicate_invoice": (
+                        "REVIEW_REQUIRED" if duplicate else "CLEAR"
+                    ),
+                    "bank_change": (
+                        "BLOCKED"
+                        if bank_mismatch
+                        else "UNVERIFIED"
+                        if bank_unverified
+                        else "CLEAR"
+                    ),
+                    "three_way_match": match_result["match_status"],
+                    "within_tolerance": within_tolerance,
+                },
+                "evidence": [
+                    {
+                        "evidence_id": str(evidence.evidence_item_id),
+                        "source_type": evidence.source_type,
+                        "reason_code": evidence.reason_code,
+                        "tokenized_claim": (
+                            "The invoice was extracted by the local parser."
+                            if evidence.source_type == "DOCUMENT_PARSER"
+                            else evidence.claim
+                        ),
+                    }
+                    for evidence in evidence_rows
+                ],
+                "policy_citations": [
+                    (
+                        f"{item['policy_version_id']}:"
+                        f"{item['clause_id']}"
+                    )
+                    for item in policies
+                ],
+                "packet_hash": evidence_hash,
+            }
+            graph_state = {
+                "tenant_id": str(tenant_id),
+                "case_id": str(case_id),
+                "run_id": str(run_id),
+                "workflow_kind": "invoice",
+                "evidence_hash": evidence_hash,
+                "case_version": case.current_version + 1,
+                "human_gate_kind": (
+                    "CLARIFICATION"
+                    if missing_po or not vendor
+                    else "APPROVAL"
+                ),
+                "required_reviews": [
+                    review_type
+                    for review_type, required in (
+                        ("DUPLICATE_REVIEW", duplicate),
+                        ("BANK_CHANGE_REVIEW", bank_mismatch),
+                        ("TAX_REVIEW", "TAX_MISMATCH" in reason_codes),
+                        (
+                            "PROCUREMENT_REVIEW",
+                            bool(exceptions)
+                            and not (
+                                duplicate
+                                or bank_mismatch
+                                or "TAX_MISMATCH" in reason_codes
+                            ),
+                        ),
+                    )
+                    if required
+                ],
+                "completed_reviews": [],
+                "deterministic_packet": graph_packet,
+                "current_stage": "deterministic_checks_complete",
+            }
+            async with tenant_workflow(str(tenant_id)) as graph:
+                graph_result = await graph.ainvoke(
+                    graph_state,
+                    workflow_config(run.thread_id),
+                )
+            run.model_name = settings.DEFAULT_MODEL
+            run.prompt_version = "enterprise-evidence-v1"
+            run.input_hash = evidence_hash
+            run.state_json = {
+                **run.state_json,
+                "evidence_hash": evidence_hash,
+                "recommendation": recommendation,
+                "reason_codes": reason_codes,
+                "current_stage": graph_result["current_stage"],
+                "blocker": graph_result.get("blocker"),
+                "contradiction_result": graph_result.get(
+                    "contradiction_result"
+                ),
+                "verification_result": graph_result.get(
+                    "verification_result"
+                ),
+                "critique_result": graph_result.get("critique_result"),
+            }
+            run.state_version += 1
+
+            if graph_result.get("blocker"):
+                case.status = CaseStatus.VERIFICATION_FAILED
+                case.current_version += 1
+                run.status = "BLOCKED"
+                run.current_node = graph_result["current_stage"]
+                await append_case_event(
+                    session,
+                    tenant_id=tenant_id,
+                    case_id=case_id,
+                    event_type="AGENT_BLOCKED",
+                    actor_type="SYSTEM",
+                    actor_id="invoice-worker",
+                    payload={
+                        "run_id": str(run_id),
+                        **graph_result["blocker"],
+                    },
+                )
+            elif missing_po or not vendor:
                 await _request_clarification(
                     session,
                     tenant_id=tenant_id,
@@ -899,23 +1056,32 @@ async def run_invoice_analysis(envelope: dict[str, Any]) -> None:
                     ],
                 )
             else:
-                if duplicate:
+                interrupt_value = graph_result["__interrupt__"][0].value
+                task_type = (
+                    interrupt_value["review_type"]
+                    if interrupt_value["kind"] == "CONTROL_REVIEW"
+                    else "INVOICE_AP_APPROVAL"
+                )
+                if task_type == "DUPLICATE_REVIEW":
                     case.status = CaseStatus.BLOCKED_DUPLICATE
-                    task_type = "DUPLICATE_REVIEW"
-                elif bank_mismatch or missing_grn:
+                elif interrupt_value["kind"] == "CONTROL_REVIEW":
                     case.status = CaseStatus.HOLD
-                    task_type = "INVOICE_EXCEPTION_RESOLUTION"
                 else:
                     case.status = CaseStatus.APPROVAL_PENDING
-                    task_type = "INVOICE_AP_APPROVAL"
                 case.current_version += 1
                 run.status = "INTERRUPTED"
-                run.current_node = "approval_interrupt"
-                run.state_json = {
-                    "evidence_hash": evidence_hash,
-                    "recommendation": recommendation,
-                    "reason_codes": reason_codes,
-                }
+                run.current_node = (
+                    "control_review"
+                    if interrupt_value["kind"] == "CONTROL_REVIEW"
+                    else "approval_interrupt"
+                )
+                assigned_role = {
+                    "DUPLICATE_REVIEW": "procurement_approver",
+                    "BANK_CHANGE_REVIEW": "finance_approver",
+                    "TAX_REVIEW": "finance_approver",
+                    "PROCUREMENT_REVIEW": "procurement_approver",
+                    "INVOICE_AP_APPROVAL": "finance_approver",
+                }[task_type]
                 session.add(
                     ApprovalTask(
                         tenant_id=tenant_id,
@@ -923,7 +1089,7 @@ async def run_invoice_analysis(envelope: dict[str, Any]) -> None:
                         run_id=run_id,
                         task_type=task_type,
                         status="PENDING",
-                        assigned_role="finance_approver",
+                        assigned_role=assigned_role,
                         proposed_action={
                             "action": "RESOLVE_INVOICE_EXCEPTION",
                             "payload": {

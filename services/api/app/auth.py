@@ -1,3 +1,4 @@
+import asyncio
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Annotated
@@ -6,11 +7,25 @@ from uuid import UUID
 import jwt
 from fastapi import Depends, Header, HTTPException, Request, status
 from jwt import PyJWKClient
+from jwt.exceptions import PyJWKClientConnectionError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import get_db, set_tenant_context
 from app.models import Tenant, User
+
+STAFF_ROLES = frozenset(
+    {
+        "analyst",
+        "approver",
+        "procurement_approver",
+        "compliance_approver",
+        "finance_approver",
+        "auditor",
+        "admin",
+    }
+)
+CASE_READ_ROLES = ("requester", *sorted(STAFF_ROLES))
 
 
 @dataclass(frozen=True)
@@ -26,11 +41,18 @@ class Principal:
         if not self.roles.intersection(roles):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail={"code": "INSUFFICIENT_PERMISSION"})
 
+    @property
+    def is_requester_only(self) -> bool:
+        return (
+            "requester" in self.roles
+            and not self.roles.intersection(STAFF_ROLES)
+        )
+
 
 @lru_cache
 def jwks_client() -> PyJWKClient:
     url = settings.KEYCLOAK_JWKS_URL or f"{settings.KEYCLOAK_ISSUER}/protocol/openid-connect/certs"
-    return PyJWKClient(url, cache_keys=True)
+    return PyJWKClient(url, cache_keys=True, timeout=5)
 
 
 def _roles_from_claims(claims: dict) -> frozenset[str]:
@@ -64,7 +86,10 @@ async def get_principal(
             raise HTTPException(status_code=401, detail={"code": "AUTH_REQUIRED"})
         token = authorization.removeprefix("Bearer ").strip()
         try:
-            signing_key = jwks_client().get_signing_key_from_jwt(token)
+            signing_key = await asyncio.to_thread(
+                jwks_client().get_signing_key_from_jwt,
+                token,
+            )
             claims = jwt.decode(
                 token,
                 signing_key.key,
@@ -80,6 +105,11 @@ async def get_principal(
                 full_name=claims.get("name", claims.get("preferred_username", "Unknown")),
                 roles=_roles_from_claims(claims),
             )
+        except PyJWKClientConnectionError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail={"code": "IDENTITY_PROVIDER_UNAVAILABLE"},
+            ) from exc
         except (KeyError, ValueError, jwt.PyJWTError) as exc:
             raise HTTPException(status_code=401, detail={"code": "INVALID_TOKEN"}) from exc
 
@@ -87,6 +117,8 @@ async def get_principal(
     request.state.principal = principal
     if settings.AUTH_MODE == "development" and settings.APP_ENV != "production":
         await _ensure_development_identity(db, principal)
+    else:
+        await _provision_oidc_identity(db, principal)
     return principal
 
 
@@ -99,17 +131,44 @@ async def _ensure_development_identity(db: AsyncSession, principal: Principal) -
             slug=f"neurox-dev-{str(principal.tenant_id)[-8:]}",
         ))
         await db.flush()
+
+
+async def _provision_oidc_identity(
+    db: AsyncSession,
+    principal: Principal,
+) -> None:
+    """Provision a user only inside an already approved tenant boundary."""
+    tenant = await db.get(Tenant, principal.tenant_id)
+    if not tenant:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "TENANT_NOT_PROVISIONED"},
+        )
     user = await db.get(User, principal.user_id)
     if not user:
-        db.add(User(
-            user_id=principal.user_id,
-            tenant_id=principal.tenant_id,
-            external_subject=principal.subject,
-            email=principal.email,
-            full_name=principal.full_name,
-            roles=sorted(principal.roles),
-        ))
+        db.add(
+            User(
+                user_id=principal.user_id,
+                tenant_id=principal.tenant_id,
+                external_subject=principal.subject,
+                email=principal.email,
+                full_name=principal.full_name,
+                roles=sorted(principal.roles),
+            )
+        )
         await db.flush()
+        return
+    if (
+        user.tenant_id != principal.tenant_id
+        or user.external_subject != principal.subject
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "IDENTITY_TENANT_MISMATCH"},
+        )
+    user.email = principal.email
+    user.full_name = principal.full_name
+    user.roles = sorted(principal.roles)
 
 
 CurrentPrincipal = Annotated[Principal, Depends(get_principal)]

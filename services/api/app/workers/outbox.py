@@ -1,11 +1,31 @@
 import asyncio
 from datetime import UTC, datetime
 
-from sqlalchemy import select
-
 from app.models import OutboxEvent
+from app.observability import configure_worker_observability
 from app.workers.common import declare_topology, message_for, open_broker
 from app.workers.database import WorkerSession
+from sqlalchemy import select
+
+REQUIRED_ROUTED_EVENTS = {
+    "agent.analysis.requested.v1",
+    "agent.erp.confirmed.v1",
+    "approval.approved.v1",
+    "approval.escalated.v1",
+    "approval.more_info.v1",
+    "approval.rejected.v1",
+    "case.submitted.v1",
+    "clarification.answered.v1",
+    "document.processing.requested.v1",
+    "erp.sync.requested.v1",
+    "invoice.analysis.requested.v1",
+    "invoice.resolution.approved.v1",
+    "invoice.submitted.v1",
+    "notification.delivery.requested.v1",
+    "policy.published.v1",
+    "review.resolved.v1",
+    "sanctions.import.requested.v1",
+}
 
 
 async def relay_batch(limit: int = 100) -> int:
@@ -33,7 +53,12 @@ async def relay_batch(limit: int = 100) -> int:
                         "traceparent": event.traceparent, "payload": event.payload,
                     }
                     try:
-                        await exchange.publish(message_for(envelope), routing_key=event.event_type, mandatory=True)
+                        await exchange.publish(
+                            message_for(envelope),
+                            routing_key=event.event_type,
+                            mandatory=event.event_type
+                            in REQUIRED_ROUTED_EVENTS,
+                        )
                         event.published_at = datetime.now(UTC)
                         event.last_error = None
                     except Exception as exc:
@@ -46,6 +71,7 @@ async def relay_batch(limit: int = 100) -> int:
 
 
 async def main() -> None:
+    configure_worker_observability("outbox-relay")
     while True:
         count = await relay_batch()
         await asyncio.sleep(0.1 if count else 1.0)

@@ -1,11 +1,12 @@
 import uuid
 from typing import Any
 
+from app.domain.security import chained_audit_hash
+from app.event_contracts import validate_event_contract
+from app.models import AuditLog, CaseEvent, OutboxEvent
+from app.observability import current_traceparent
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from app.domain.security import chained_audit_hash
-from app.models import AuditLog, CaseEvent, OutboxEvent
 
 
 async def append_case_event(
@@ -46,6 +47,7 @@ def enqueue_event(
     payload: dict[str, Any],
     correlation_id: uuid.UUID | None = None,
 ) -> OutboxEvent:
+    validate_event_contract(event_type, payload)
     event = OutboxEvent(
         tenant_id=tenant_id,
         aggregate_type=aggregate_type,
@@ -54,6 +56,7 @@ def enqueue_event(
         event_type=event_type,
         idempotency_key=idempotency_key,
         correlation_id=correlation_id or uuid.uuid4(),
+        traceparent=current_traceparent(),
         payload=payload,
     )
     db.add(event)
