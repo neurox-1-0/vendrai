@@ -1,17 +1,25 @@
 import asyncio
 import re
+import time
 import uuid
-from datetime import date
+from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
 import httpx
+from app.agents.execution import execute_parallel
+from app.agents.planning import (
+    create_investigation_plan,
+    eligible_capabilities,
+)
 from app.agents.workflow import tenant_workflow, workflow_config
 from app.config import settings
 from app.domain.cases import CaseStatus
 from app.domain.security import canonical_hash, normalize_vendor_name
+from app.llm_gateway import LLMProviderError
 from app.models import (
     AgentRun,
+    AgentStep,
     ApprovalTask,
     Case,
     ClarificationTask,
@@ -346,6 +354,180 @@ async def _reference_data(
     return po_data, grn_data, source
 
 
+async def _load_po_reference(
+    tenant_id: uuid.UUID,
+    po_number: str | None,
+    case_vendor_id: uuid.UUID | None,
+    uploaded_po_text: str | None,
+) -> tuple[dict[str, Any], str]:
+    po_data: dict[str, Any] = {
+        "po_number": po_number,
+        "tax_rate": 0.0,
+        "lines": {},
+    }
+    if po_number:
+        async with WorkerSession() as session, session.begin():
+            await set_worker_tenant(session, str(tenant_id))
+            po = await session.scalar(
+                select(PurchaseOrder).where(
+                    PurchaseOrder.tenant_id == tenant_id,
+                    PurchaseOrder.po_number == po_number,
+                )
+            )
+            if po and (
+                case_vendor_id is None
+                or po.vendor_id == case_vendor_id
+            ):
+                po_lines = (
+                    await session.execute(
+                        select(PurchaseOrderLine).where(
+                            PurchaseOrderLine.purchase_order_id
+                            == po.purchase_order_id
+                        )
+                    )
+                ).scalars().all()
+                return (
+                    {
+                        "po_number": po.po_number,
+                        "tax_rate": (
+                            float(po_lines[0].tax_rate)
+                            if po_lines
+                            else 0.0
+                        ),
+                        "total_amount": float(po.total_amount),
+                        "lines": {
+                            line.line_number: {
+                                "line_number": line.line_number,
+                                "description": line.item_description,
+                                "quantity": float(line.quantity),
+                                "unit_price": float(line.unit_price),
+                                "amount": float(line.amount),
+                            }
+                            for line in po_lines
+                        },
+                    },
+                    "ERP_DATABASE",
+                )
+    if uploaded_po_text:
+        return parse_po_text(uploaded_po_text), "UPLOADED_DOCUMENT"
+    return po_data, "NONE"
+
+
+async def _load_grn_reference(
+    tenant_id: uuid.UUID,
+    po_number: str | None,
+    case_vendor_id: uuid.UUID | None,
+    uploaded_grn_text: str | None,
+) -> tuple[dict[str, Any], str]:
+    grn_data: dict[str, Any] = {"lines": {}}
+    if po_number:
+        async with WorkerSession() as session, session.begin():
+            await set_worker_tenant(session, str(tenant_id))
+            receipts = (
+                await session.execute(
+                    select(GoodsReceipt)
+                    .join(
+                        PurchaseOrder,
+                        PurchaseOrder.purchase_order_id
+                        == GoodsReceipt.purchase_order_id,
+                    )
+                    .where(
+                        GoodsReceipt.tenant_id == tenant_id,
+                        GoodsReceipt.status == "RECEIVED",
+                        PurchaseOrder.po_number == po_number,
+                        *(
+                            [PurchaseOrder.vendor_id == case_vendor_id]
+                            if case_vendor_id
+                            else []
+                        ),
+                    )
+                )
+            ).scalars().all()
+            for receipt in receipts:
+                receipt_lines = (
+                    await session.execute(
+                        select(GoodsReceiptLine).where(
+                            GoodsReceiptLine.goods_receipt_id
+                            == receipt.goods_receipt_id,
+                            GoodsReceiptLine.quality_status == "ACCEPTED",
+                        )
+                    )
+                ).scalars().all()
+                for line in receipt_lines:
+                    grn_data["lines"][line.line_number] = {
+                        "line_number": line.line_number,
+                        "received": float(line.quantity_received),
+                    }
+            if grn_data["lines"]:
+                return grn_data, "ERP_DATABASE"
+    if uploaded_grn_text:
+        return parse_grn_text(uploaded_grn_text), "UPLOADED_DOCUMENT"
+    return grn_data, "NONE"
+
+
+async def _resolve_invoice_vendor(
+    tenant_id: uuid.UUID,
+    case_vendor_id: uuid.UUID | None,
+    vendor_name: str | None,
+) -> dict[str, Any]:
+    async with WorkerSession() as session, session.begin():
+        await set_worker_tenant(session, str(tenant_id))
+        vendor = (
+            await session.get(Vendor, case_vendor_id)
+            if case_vendor_id
+            else None
+        )
+        if not vendor and vendor_name:
+            vendor = await session.scalar(
+                select(Vendor).where(
+                    Vendor.tenant_id == tenant_id,
+                    Vendor.normalized_legal_name
+                    == normalize_vendor_name(vendor_name),
+                )
+            )
+        return {
+            "vendor_id": str(vendor.vendor_id) if vendor else None,
+            "bank_account_hash": (
+                vendor.bank_account_hash.hex()
+                if vendor and vendor.bank_account_hash
+                else None
+            ),
+        }
+
+
+async def _find_duplicate_invoice(
+    tenant_id: uuid.UUID,
+    vendor_id: str,
+    invoice_number: str,
+) -> bool:
+    async with WorkerSession() as session, session.begin():
+        await set_worker_tenant(session, str(tenant_id))
+        return bool(
+            await session.scalar(
+                select(func.count())
+                .select_from(InvoiceHistoryRecord)
+                .where(
+                    InvoiceHistoryRecord.tenant_id == tenant_id,
+                    InvoiceHistoryRecord.vendor_id == vendor_id,
+                    func.lower(InvoiceHistoryRecord.invoice_number)
+                    == invoice_number.lower(),
+                )
+            )
+        )
+
+
+async def _timed(awaitable):
+    started_at = datetime.now(UTC)
+    started = time.perf_counter()
+    result = await awaitable
+    return {
+        "result": result,
+        "started_at": started_at,
+        "completed_at": datetime.now(UTC),
+        "latency_ms": round((time.perf_counter() - started) * 1000),
+    }
+
+
 def _three_way_match(
     invoice: dict[str, Any],
     po_data: dict[str, Any],
@@ -550,6 +732,8 @@ async def run_invoice_analysis(envelope: dict[str, Any]) -> None:
             run = await session.get(AgentRun, run_id, with_for_update=True)
             if not case or case.tenant_id != tenant_id or not run:
                 raise RuntimeError("INVOICE_CONTEXT_NOT_FOUND")
+            document_started_at = datetime.now(UTC)
+            document_started = time.perf_counter()
             documents = (
                 await session.execute(
                     select(Document).where(
@@ -606,6 +790,10 @@ async def run_invoice_analysis(envelope: dict[str, Any]) -> None:
                 )
                 session.add(InboxReceipt(consumer_name="invoice-worker", event_id=event_id, tenant_id=tenant_id))
                 return
+            document_completed_at = datetime.now(UTC)
+            document_latency_ms = round(
+                (time.perf_counter() - document_started) * 1000
+            )
 
             invoice_record = await session.scalar(
                 select(InvoiceRecord).where(
@@ -649,11 +837,302 @@ async def run_invoice_analysis(envelope: dict[str, Any]) -> None:
                     )
                 )
 
-            po_data, grn_data, reference_source = await _reference_data(
-                session, tenant_id, case, invoice_record, classified
+            observable_facts = {
+                "documents_ready": True,
+                "invoice_number_available": bool(
+                    extracted_invoice.get("invoice_number")
+                ),
+                "po_reference_available": bool(
+                    invoice_record.po_number
+                    or classified["PURCHASE_ORDER"]
+                ),
+                "vendor_identity_available": bool(
+                    case.vendor_id
+                    or extracted_invoice.get("vendor_name")
+                ),
+                "bank_account_available": bool(
+                    await session.scalar(
+                        select(ExtractedField.extracted_field_id).where(
+                            ExtractedField.document_id
+                            == invoice_document.document_id,
+                            ExtractedField.field_name == "bank_account",
+                        )
+                    )
+                ),
+            }
+            planner_error: LLMProviderError | None = None
+            plan = None
+            try:
+                plan = await create_investigation_plan(
+                    "invoice",
+                    "Investigate this invoice exception and prepare a safe, evidence-backed resolution.",
+                    observable_facts,
+                )
+                selected_capabilities = {
+                    item.capability_id
+                    for item in plan.output.selected_capabilities
+                }
+                planner_status = "SUCCESS"
+                planner_output = {
+                    "plan": plan.as_dict(),
+                    "provider_version": plan.model_version,
+                }
+                planner_failure = {}
+                planner_latency = plan.latency_ms
+            except LLMProviderError as exc:
+                planner_error = exc
+                selected_capabilities = {
+                    capability.capability_id
+                    for capability in eligible_capabilities(
+                        "invoice",
+                        observable_facts,
+                    )
+                    if capability.mandatory_when_eligible
+                }
+                planner_status = "FAILED"
+                planner_output = {
+                    "preserved_mandatory_work": sorted(
+                        selected_capabilities
+                    )
+                }
+                planner_failure = {
+                    "error_code": exc.error_code,
+                    "retryable": exc.retryable,
+                    "upgrade_required": exc.upgrade_required,
+                }
+                planner_latency = None
+            session.add_all(
+                [
+                    AgentStep(
+                        tenant_id=tenant_id,
+                        run_id=run_id,
+                        node_name="goal_planner",
+                        attempt=run.state_version,
+                        status=planner_status,
+                        input_summary={
+                            "observable_facts": observable_facts,
+                            "route_reason": (
+                                "The invoice objective requires a validated "
+                                "investigation plan."
+                            ),
+                            "dependencies": [],
+                        },
+                        output_summary=planner_output,
+                        error=planner_failure,
+                        latency_ms=planner_latency,
+                    ),
+                    AgentStep(
+                        tenant_id=tenant_id,
+                        run_id=run_id,
+                        node_name="document_intelligence",
+                        attempt=run.state_version,
+                        status="SUCCESS",
+                        input_summary={
+                            "route_reason": (
+                                "Uploaded invoice evidence must be classified "
+                                "and extracted locally before matching."
+                            ),
+                            "dependencies": [],
+                            "started_at": document_started_at.isoformat(),
+                        },
+                        output_summary={
+                            "document_id": str(
+                                invoice_document.document_id
+                            ),
+                            "line_count": len(
+                                extracted_invoice["line_items"]
+                            ),
+                            "completed_at": (
+                                document_completed_at.isoformat()
+                            ),
+                        },
+                        error={},
+                        latency_ms=document_latency_ms,
+                    ),
+                ]
             )
-            match_result = _three_way_match(extracted_invoice, po_data, grn_data)
-            reason_codes: list[str] = []
+
+            uploaded_po_text = (
+                classified["PURCHASE_ORDER"][0][1]
+                if classified["PURCHASE_ORDER"]
+                else None
+            )
+            uploaded_grn_text = (
+                classified["GOODS_RECEIPT"][0][1]
+                if classified["GOODS_RECEIPT"]
+                else None
+            )
+            initial_operations = {}
+            if "po_retrieval" in selected_capabilities:
+                initial_operations["po_retrieval"] = (
+                    _load_po_reference(
+                        tenant_id,
+                        invoice_record.po_number,
+                        case.vendor_id,
+                        uploaded_po_text,
+                    )
+                )
+            if "grn_retrieval" in selected_capabilities:
+                initial_operations["grn_retrieval"] = (
+                    _load_grn_reference(
+                        tenant_id,
+                        invoice_record.po_number,
+                        case.vendor_id,
+                        uploaded_grn_text,
+                    )
+                )
+            if "vendor_resolution" in selected_capabilities:
+                initial_operations["vendor_resolution"] = (
+                    _resolve_invoice_vendor(
+                        tenant_id,
+                        case.vendor_id,
+                        extracted_invoice.get("vendor_name"),
+                    )
+                )
+            initial_results = await execute_parallel(initial_operations)
+            po_execution = initial_results.get("po_retrieval")
+            po_data, po_source = (
+                po_execution["result"]
+                if po_execution
+                and po_execution["status"] == "SUCCESS"
+                else (
+                    {
+                        "po_number": invoice_record.po_number,
+                        "tax_rate": 0.0,
+                        "lines": {},
+                    },
+                    "NONE",
+                )
+            )
+            grn_execution = initial_results.get("grn_retrieval")
+            grn_data, grn_source = (
+                grn_execution["result"]
+                if grn_execution
+                and grn_execution["status"] == "SUCCESS"
+                else ({"lines": {}}, "NONE")
+            )
+            vendor_result = (
+                initial_results["vendor_resolution"]["result"]
+                if initial_results.get("vendor_resolution")
+                and initial_results["vendor_resolution"]["status"]
+                == "SUCCESS"
+                else {
+                    "vendor_id": None,
+                    "bank_account_hash": None,
+                }
+            )
+            reference_source = (
+                f"PO:{po_source};GRN:{grn_source}"
+            )
+            route_reasons = {
+                item.capability_id: item.rationale
+                for item in plan.output.selected_capabilities
+            } if plan else {}
+            for capability_id, result in initial_results.items():
+                output = result["result"]
+                if capability_id == "po_retrieval":
+                    output = output or ({}, "NONE")
+                    summary = {
+                        "source": output[1],
+                        "line_count": len(output[0].get("lines", {})),
+                    }
+                elif capability_id == "grn_retrieval":
+                    output = output or ({}, "NONE")
+                    summary = {
+                        "source": output[1],
+                        "line_count": len(output[0].get("lines", {})),
+                    }
+                else:
+                    summary = {
+                        "vendor_resolved": bool(
+                            output and output["vendor_id"]
+                        ),
+                    }
+                session.add(
+                    AgentStep(
+                        tenant_id=tenant_id,
+                        run_id=run_id,
+                        node_name=capability_id,
+                        attempt=run.state_version,
+                        status=result["status"],
+                        input_summary={
+                            "route_reason": route_reasons.get(
+                                capability_id,
+                                "Mandatory investigation retained after planner failure.",
+                            ),
+                            "dependencies": (
+                                ["document_intelligence"]
+                                if capability_id == "vendor_resolution"
+                                else ["goal_planner"]
+                            ),
+                            "started_at": result[
+                                "started_at"
+                            ].isoformat(),
+                        },
+                        output_summary={
+                            **summary,
+                            "completed_at": result[
+                                "completed_at"
+                            ].isoformat(),
+                        },
+                        error=result["error"],
+                        latency_ms=result["latency_ms"],
+                    )
+                )
+            match_started_at = datetime.now(UTC)
+            match_started = time.perf_counter()
+            match_result = await asyncio.to_thread(
+                _three_way_match,
+                extracted_invoice,
+                po_data,
+                grn_data,
+            )
+            match_completed_at = datetime.now(UTC)
+            match_latency_ms = round(
+                (time.perf_counter() - match_started) * 1000
+            )
+            if "three_way_match" in selected_capabilities:
+                session.add(
+                    AgentStep(
+                        tenant_id=tenant_id,
+                        run_id=run_id,
+                        node_name="three_way_match",
+                        attempt=run.state_version,
+                        status="SUCCESS",
+                        input_summary={
+                            "route_reason": route_reasons.get(
+                                "three_way_match",
+                                "A referenced purchase order requires invoice, PO, and receipt comparison.",
+                            ),
+                            "dependencies": [
+                                "document_intelligence",
+                                "po_retrieval",
+                                "grn_retrieval",
+                            ],
+                            "started_at": match_started_at.isoformat(),
+                        },
+                        output_summary={
+                            "match_status": match_result["match_status"],
+                            "line_count": len(
+                                match_result["line_matches"]
+                            ),
+                            "completed_at": (
+                                match_completed_at.isoformat()
+                            ),
+                        },
+                        error={},
+                        latency_ms=match_latency_ms,
+                    )
+                )
+            reason_codes: list[str] = [
+                {
+                    "po_retrieval": "PO_RETRIEVAL_FAILED",
+                    "grn_retrieval": "GRN_RETRIEVAL_FAILED",
+                    "vendor_resolution": "VENDOR_RESOLUTION_FAILED",
+                }[capability_id]
+                for capability_id, result in initial_results.items()
+                if result["status"] == "FAILED"
+            ]
             exceptions: list[dict[str, Any]] = []
             missing_po = check_missing_po(extracted_invoice, documents, po_data)
             missing_grn = not bool(grn_data.get("lines"))
@@ -700,33 +1179,58 @@ async def run_invoice_analysis(envelope: dict[str, Any]) -> None:
                         }
                     )
 
-            vendor = await session.get(Vendor, case.vendor_id) if case.vendor_id else None
-            if not vendor and extracted_invoice.get("vendor_name"):
-                normalized = normalize_vendor_name(extracted_invoice["vendor_name"])
-                vendor = await session.scalar(
-                    select(Vendor).where(
-                        Vendor.tenant_id == tenant_id,
-                        Vendor.normalized_legal_name == normalized,
-                    )
+            vendor = (
+                await session.get(
+                    Vendor,
+                    uuid.UUID(vendor_result["vendor_id"]),
                 )
-                if vendor:
-                    case.vendor_id = vendor.vendor_id
-                    invoice_record.vendor_id = vendor.vendor_id
-            duplicate = False
+                if vendor_result["vendor_id"]
+                else None
+            )
             if vendor:
-                duplicate = bool(
-                    await session.scalar(
-                        select(func.count())
-                        .select_from(InvoiceHistoryRecord)
-                        .where(
-                            InvoiceHistoryRecord.tenant_id == tenant_id,
-                            InvoiceHistoryRecord.vendor_id == str(vendor.vendor_id),
-                            func.lower(InvoiceHistoryRecord.invoice_number)
-                            == extracted_invoice["invoice_number"].lower(),
-                        )
+                case.vendor_id = vendor.vendor_id
+                invoice_record.vendor_id = vendor.vendor_id
+            duplicate = False
+            if (
+                vendor_result["vendor_id"]
+                and "duplicate_invoice" in selected_capabilities
+            ):
+                duplicate_result = await _timed(
+                    _find_duplicate_invoice(
+                        tenant_id,
+                        vendor_result["vendor_id"],
+                        extracted_invoice["invoice_number"],
                     )
                 )
-            else:
+                duplicate = bool(duplicate_result["result"])
+                session.add(
+                    AgentStep(
+                        tenant_id=tenant_id,
+                        run_id=run_id,
+                        node_name="duplicate_invoice",
+                        attempt=run.state_version,
+                        status="SUCCESS",
+                        input_summary={
+                            "route_reason": route_reasons.get(
+                                "duplicate_invoice",
+                                "A resolved vendor and invoice number allow an invoice-history search.",
+                            ),
+                            "dependencies": ["vendor_resolution"],
+                            "started_at": duplicate_result[
+                                "started_at"
+                            ].isoformat(),
+                        },
+                        output_summary={
+                            "duplicate_found": duplicate,
+                            "completed_at": duplicate_result[
+                                "completed_at"
+                            ].isoformat(),
+                        },
+                        error={},
+                        latency_ms=duplicate_result["latency_ms"],
+                    )
+                )
+            if not vendor:
                 reason_codes.append("VENDOR_UNRESOLVED")
             if duplicate:
                 reason_codes.append("DUPLICATE_INVOICE")
@@ -740,6 +1244,8 @@ async def run_invoice_analysis(envelope: dict[str, Any]) -> None:
                     }
                 )
 
+            bank_started_at = datetime.now(UTC)
+            bank_started = time.perf_counter()
             bank_field = await session.scalar(
                 select(ExtractedField).where(
                     ExtractedField.document_id == invoice_document.document_id,
@@ -766,6 +1272,55 @@ async def run_invoice_analysis(envelope: dict[str, Any]) -> None:
                 )
             elif bank_unverified:
                 reason_codes.append("BANK_ACCOUNT_UNVERIFIED")
+            bank_completed_at = datetime.now(UTC)
+            bank_latency_ms = round(
+                (time.perf_counter() - bank_started) * 1000
+            )
+            if "bank_consistency" in selected_capabilities:
+                bank_status = (
+                    "BLOCKED"
+                    if bank_mismatch
+                    else "PARTIAL"
+                    if bank_unverified
+                    else "SUCCESS"
+                )
+                session.add(
+                    AgentStep(
+                        tenant_id=tenant_id,
+                        run_id=run_id,
+                        node_name="bank_consistency",
+                        attempt=run.state_version,
+                        status=bank_status,
+                        input_summary={
+                            "route_reason": route_reasons.get(
+                                "bank_consistency",
+                                "Bank evidence and a vendor identity are both available.",
+                            ),
+                            "dependencies": [
+                                "document_intelligence",
+                                "vendor_resolution",
+                            ],
+                            "started_at": bank_started_at.isoformat(),
+                        },
+                        output_summary={
+                            "disposition": (
+                                "MISMATCH"
+                                if bank_mismatch
+                                else "UNVERIFIED"
+                                if bank_unverified
+                                else "CLEAR"
+                            ),
+                            "compared_by_blind_index": bool(
+                                bank_field and vendor
+                            ),
+                            "completed_at": (
+                                bank_completed_at.isoformat()
+                            ),
+                        },
+                        error={},
+                        latency_ms=bank_latency_ms,
+                    )
+                )
 
             tax_result = check_tax_mismatch(extracted_invoice, po_data)
             if tax_result["mismatch"]:
@@ -795,7 +1350,44 @@ async def run_invoice_analysis(envelope: dict[str, Any]) -> None:
             if not within_tolerance:
                 reason_codes.append("EXCEEDS_TOLERANCE")
             reason_codes = sorted(set(reason_codes or ["CLEAN_THREE_WAY_MATCH"]))
-            policies = await _policy_clauses(tenant_id, reason_codes)
+            policy_result = await _timed(
+                _policy_clauses(tenant_id, reason_codes)
+            )
+            policies = policy_result["result"]
+            session.add(
+                AgentStep(
+                    tenant_id=tenant_id,
+                    run_id=run_id,
+                    node_name="policy_retrieval",
+                    attempt=run.state_version,
+                    status="SUCCESS" if policies else "BLOCKED",
+                    input_summary={
+                        "route_reason": route_reasons.get(
+                            "policy_retrieval",
+                            "Current policy evidence is mandatory before an invoice resolution.",
+                        ),
+                        "dependencies": ["goal_planner"],
+                        "started_at": policy_result[
+                            "started_at"
+                        ].isoformat(),
+                    },
+                    output_summary={
+                        "clause_count": len(policies),
+                        "completed_at": policy_result[
+                            "completed_at"
+                        ].isoformat(),
+                    },
+                    error={
+                        "error_code": (
+                            None
+                            if policies
+                            else "INSUFFICIENT_POLICY_EVIDENCE"
+                        ),
+                        "retryable": not bool(policies),
+                    },
+                    latency_ms=policy_result["latency_ms"],
+                )
+            )
             if not policies:
                 case.status = CaseStatus.VERIFICATION_FAILED
                 case.current_version += 1
@@ -804,6 +1396,15 @@ async def run_invoice_analysis(envelope: dict[str, Any]) -> None:
                 run.state_json = {
                     **run.state_json,
                     "reason_code": "INSUFFICIENT_POLICY_EVIDENCE",
+                    "plan": plan.as_dict() if plan else {
+                        "status": "FAILED",
+                        "error_code": planner_error.error_code
+                        if planner_error
+                        else "UNKNOWN",
+                        "preserved_mandatory_work": sorted(
+                            selected_capabilities
+                        ),
+                    },
                 }
                 await append_case_event(
                     session,
@@ -995,10 +1596,79 @@ async def run_invoice_analysis(envelope: dict[str, Any]) -> None:
                 "deterministic_packet": graph_packet,
                 "current_stage": "deterministic_checks_complete",
             }
-            async with tenant_workflow(str(tenant_id)) as graph:
-                graph_result = await graph.ainvoke(
-                    graph_state,
-                    workflow_config(run.thread_id),
+            if planner_error:
+                graph_result = {
+                    **graph_state,
+                    "current_stage": "goal_planner_blocked",
+                    "outcome": "BLOCKED",
+                    "blocker": {
+                        "error_code": planner_error.error_code,
+                        "retryable": planner_error.retryable,
+                        "upgrade_required": planner_error.upgrade_required,
+                    },
+                }
+            else:
+                async with tenant_workflow(str(tenant_id)) as graph:
+                    graph_result = await graph.ainvoke(
+                        graph_state,
+                        workflow_config(run.thread_id),
+                    )
+            for node_name, result_key in (
+                ("gemini_contradiction", "contradiction_result"),
+                ("deterministic_verification", "verification_result"),
+                ("gemini_evidence_critique", "critique_result"),
+            ):
+                result = graph_result.get(result_key)
+                if not result:
+                    continue
+                session.add(
+                    AgentStep(
+                        tenant_id=tenant_id,
+                        run_id=run_id,
+                        node_name=node_name,
+                        attempt=run.state_version,
+                        status=result["status"],
+                        input_summary={
+                            "evidence_hash": evidence_hash,
+                            "reason_code_count": len(reason_codes),
+                            "route_reason": (
+                                "Aggregated specialist evidence requires "
+                                "bounded reasoning and verification."
+                            ),
+                            "dependencies": (
+                                [
+                                    "duplicate_invoice",
+                                    "bank_consistency",
+                                    "policy_retrieval",
+                                    "three_way_match",
+                                ]
+                                if node_name == "gemini_contradiction"
+                                else [
+                                    "gemini_contradiction"
+                                    if node_name
+                                    == "deterministic_verification"
+                                    else "deterministic_verification"
+                                ]
+                            ),
+                        },
+                        output_summary={
+                            "data": result.get("data", {}),
+                            "provider_version": result[
+                                "provider_version"
+                            ],
+                            "idempotency_key": result[
+                                "idempotency_key"
+                            ],
+                        },
+                        error={
+                            "error_code": result.get("error_code"),
+                            "retryable": result.get(
+                                "retryable",
+                                False,
+                            ),
+                        },
+                        latency_ms=result["latency_ms"],
+                    )
                 )
             run.model_name = settings.DEFAULT_MODEL
             run.prompt_version = "enterprise-evidence-v1"
@@ -1006,6 +1676,15 @@ async def run_invoice_analysis(envelope: dict[str, Any]) -> None:
             run.state_json = {
                 **run.state_json,
                 "evidence_hash": evidence_hash,
+                "plan": plan.as_dict() if plan else {
+                    "status": "FAILED",
+                    "error_code": planner_error.error_code
+                    if planner_error
+                    else "UNKNOWN",
+                    "preserved_mandatory_work": sorted(
+                        selected_capabilities
+                    ),
+                },
                 "recommendation": recommendation,
                 "reason_codes": reason_codes,
                 "current_stage": graph_result["current_stage"],

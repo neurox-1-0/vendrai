@@ -1,8 +1,14 @@
 import asyncio
+import time
 import uuid
 from datetime import UTC, datetime
 
 import httpx
+from app.agents.execution import execute_parallel
+from app.agents.planning import (
+    create_investigation_plan,
+    eligible_capabilities,
+)
 from app.agents.workflow import tenant_workflow, workflow_config
 from app.config import settings
 from app.domain.cases import CaseStatus, assert_transition
@@ -12,6 +18,7 @@ from app.domain.intelligence import (
     score_duplicate,
 )
 from app.domain.security import canonical_hash, normalize_vendor_name
+from app.llm_gateway import LLMProviderError
 from app.models import (
     AgentRun,
     AgentStep,
@@ -75,6 +82,71 @@ def duplicate_score(fields: dict[str, str], vendor: Vendor) -> tuple[float, dict
     return result.score, result.signals
 
 
+def evaluate_duplicate_candidates(
+    fields: dict[str, str],
+    vendors: list[Vendor],
+) -> list[dict]:
+    candidates: list[dict] = []
+    for vendor in vendors:
+        score, signals = duplicate_score(fields, vendor)
+        if score < 0.45:
+            continue
+        review = score >= 0.70 or bool(
+            signals["tax_exact"] or signals["bank_exact"]
+        )
+        candidates.append(
+            {
+                "vendor_id": str(vendor.vendor_id),
+                "name": vendor.legal_name,
+                "score": score,
+                "signals": signals,
+                "review_required": review,
+            }
+        )
+    return candidates
+
+
+def evaluate_sanctions_candidates(
+    query_name: str,
+    datasets: list[SanctionsDataset],
+    sanctions_entities: list[SanctionsEntityRecord],
+    missing_sanctions: list[str],
+    stale_sanctions: list[str],
+) -> tuple[list[dict], str]:
+    candidates: list[dict] = []
+    datasets_by_id = {dataset.dataset_id: dataset for dataset in datasets}
+    for entity in sanctions_entities:
+        names = [entity.primary_name, *entity.aliases]
+        best_name, best_score = max(
+            (
+                (name, sanctions_name_score(query_name, name))
+                for name in names
+            ),
+            key=lambda item: item[1],
+        )
+        if best_score < 0.84:
+            continue
+        dataset = datasets_by_id[entity.dataset_id]
+        candidates.append(
+            {
+                "source": dataset.source,
+                "version": dataset.version,
+                "entity_id": entity.external_id,
+                "matched_name": best_name,
+                "score": round(best_score, 4),
+            }
+        )
+    unavailable = bool(missing_sanctions or stale_sanctions)
+    disposition = (
+        "UNAVAILABLE"
+        if unavailable
+        else "POSSIBLE_MATCH"
+        if candidates
+        else "CLEAR"
+    )
+    return candidates, disposition
+
+
 async def handle_case_submitted(envelope: dict) -> None:
     event_id = uuid.UUID(envelope["event_id"])
     tenant_id = uuid.UUID(envelope["tenant_id"])
@@ -120,6 +192,8 @@ async def run_analysis(envelope: dict) -> None:
             run.started_at = run.started_at or datetime.now(UTC)
             await append_case_event(session, tenant_id=tenant_id, case_id=case_id, event_type="SPECIALIST_ANALYSIS_STARTED", actor_type="SYSTEM", actor_id="agent-worker", payload={"run_id": str(run_id)})
 
+            document_started_at = datetime.now(UTC)
+            document_started = time.perf_counter()
             fields_rows = (await session.execute(
                 select(ExtractedField).join(Document).where(Document.case_id == case_id, ExtractedField.tenant_id == tenant_id)
             )).scalars().all()
@@ -131,18 +205,128 @@ async def run_analysis(envelope: dict) -> None:
             legal_field = field_sources.get("legal_name")
             legal_name = legal_field.field_value_masked if legal_field else None
             fields["legal_name_normalized"] = normalize_vendor_name(legal_name or "")
+            document_completed_at = datetime.now(UTC)
+            session.add(
+                AgentStep(
+                    tenant_id=tenant_id,
+                    run_id=run_id,
+                    node_name="document_intelligence",
+                    attempt=run.state_version,
+                    status="SUCCESS",
+                    input_summary={
+                        "route_reason": (
+                            "Locally extracted supplier evidence is required "
+                            "before identity and policy investigation."
+                        ),
+                        "dependencies": ["document_processing"],
+                        "started_at": document_started_at.isoformat(),
+                    },
+                    output_summary={
+                        "field_count": len(fields_rows),
+                        "document_count": len(
+                            {
+                                field.document_id
+                                for field in fields_rows
+                            }
+                        ),
+                        "completed_at": (
+                            document_completed_at.isoformat()
+                        ),
+                    },
+                    error={},
+                    latency_ms=round(
+                        (time.perf_counter() - document_started) * 1000
+                    ),
+                )
+            )
 
-            vendors = (await session.execute(select(Vendor).where(Vendor.tenant_id == tenant_id))).scalars().all()
-            duplicate_items: list[dict] = []
-            for vendor in vendors:
-                score, signals = duplicate_score(fields, vendor)
-                if score >= 0.45:
-                    review = score >= 0.70 or bool(signals["tax_exact"] or signals["bank_exact"])
-                    session.add(DuplicateCandidateRecord(
-                        tenant_id=tenant_id, case_id=case_id, vendor_id=vendor.vendor_id,
-                        score=score, signals=signals, review_required=review,
-                    ))
-                    duplicate_items.append({"vendor_id": str(vendor.vendor_id), "name": vendor.legal_name, "score": score, "signals": signals, "review_required": review})
+            observable_facts = {
+                "documents_ready": True,
+                "legal_name_available": bool(fields["legal_name_normalized"]),
+                "bank_account_available": bool(fields.get("bank_account")),
+                "registered_country_available": bool(
+                    fields.get("registered_country")
+                ),
+            }
+            planner_error: LLMProviderError | None = None
+            plan = None
+            try:
+                plan = await create_investigation_plan(
+                    "supplier",
+                    "Investigate this supplier and prepare a safe, evidence-backed onboarding decision.",
+                    observable_facts,
+                )
+                selected_capabilities = {
+                    item.capability_id
+                    for item in plan.output.selected_capabilities
+                }
+                session.add(
+                    AgentStep(
+                        tenant_id=tenant_id,
+                        run_id=run_id,
+                        node_name="goal_planner",
+                        attempt=run.state_version,
+                        status="SUCCESS",
+                        input_summary={
+                            "observable_facts": observable_facts,
+                            "route_reason": (
+                                "The high-level supplier onboarding goal "
+                                "requires a validated investigation plan."
+                            ),
+                            "dependencies": [],
+                        },
+                        output_summary={
+                            "plan": plan.as_dict(),
+                            "provider_version": plan.model_version,
+                        },
+                        error={},
+                        latency_ms=plan.latency_ms,
+                    )
+                )
+            except LLMProviderError as exc:
+                planner_error = exc
+                selected_capabilities = {
+                    capability.capability_id
+                    for capability in eligible_capabilities(
+                        "supplier",
+                        observable_facts,
+                    )
+                    if capability.mandatory_when_eligible
+                }
+                session.add(
+                    AgentStep(
+                        tenant_id=tenant_id,
+                        run_id=run_id,
+                        node_name="goal_planner",
+                        attempt=run.state_version,
+                        status="FAILED",
+                        input_summary={
+                            "observable_facts": observable_facts,
+                            "route_reason": (
+                                "The high-level supplier onboarding goal "
+                                "requires a validated investigation plan."
+                            ),
+                            "dependencies": [],
+                        },
+                        output_summary={
+                            "preserved_mandatory_work": sorted(
+                                selected_capabilities
+                            )
+                        },
+                        error={
+                            "error_code": exc.error_code,
+                            "retryable": exc.retryable,
+                            "upgrade_required": exc.upgrade_required,
+                        },
+                        latency_ms=None,
+                    )
+                )
+
+            vendors = (
+                await session.execute(
+                    select(Vendor).where(Vendor.tenant_id == tenant_id)
+                )
+            ).scalars().all()
 
             published_datasets = (
                 await session.execute(
@@ -161,25 +345,157 @@ async def run_analysis(envelope: dict) -> None:
             sanctions_entities = (await session.execute(
                 select(SanctionsEntityRecord).where(SanctionsEntityRecord.dataset_id.in_(dataset_ids))
             )).scalars().all() if dataset_ids else []
-            risk_candidates: list[dict] = []
-            query_name = fields["legal_name_normalized"]
-            for entity in sanctions_entities:
-                names = [entity.primary_name, *entity.aliases]
-                best_name, best_score = max(
-                    ((name, sanctions_name_score(query_name, name)) for name in names),
-                    key=lambda item: item[1],
+
+            policy_query = "new vendor onboarding required documents bank details sanctions screening human approval"
+            selected_operations = {}
+            if "duplicate_detection" in selected_capabilities:
+                selected_operations["duplicate_detection"] = (
+                    asyncio.to_thread(
+                        evaluate_duplicate_candidates,
+                        fields,
+                        list(vendors),
+                    )
                 )
-                if best_score >= 0.84:
-                    dataset = next(item for item in datasets if item.dataset_id == entity.dataset_id)
-                    risk_candidates.append({"source": dataset.source, "version": dataset.version, "entity_id": entity.external_id, "matched_name": best_name, "score": round(best_score, 4)})
-            sanctions_unavailable = bool(missing_sanctions or stale_sanctions)
-            risk_disposition = (
-                "UNAVAILABLE"
-                if sanctions_unavailable
-                else "POSSIBLE_MATCH"
-                if risk_candidates
-                else "CLEAR"
+            if "sanctions_screening" in selected_capabilities:
+                selected_operations["sanctions_screening"] = (
+                    asyncio.to_thread(
+                        evaluate_sanctions_candidates,
+                        fields["legal_name_normalized"],
+                        list(datasets),
+                        list(sanctions_entities),
+                        missing_sanctions,
+                        stale_sanctions,
+                    )
+                )
+            if "policy_retrieval" in selected_capabilities:
+                selected_operations["policy_retrieval"] = (
+                    retrieve_policy(tenant_id, policy_query)
+                )
+            specialist_results = await execute_parallel(
+                selected_operations
             )
+            duplicate_result = specialist_results.get(
+                "duplicate_detection"
+            )
+            duplicate_items = (
+                duplicate_result["result"]
+                if duplicate_result
+                and duplicate_result["status"] == "SUCCESS"
+                else []
+            )
+            sanctions_result = specialist_results.get(
+                "sanctions_screening"
+            )
+            risk_candidates, risk_disposition = (
+                sanctions_result["result"]
+                if sanctions_result
+                and sanctions_result["status"] == "SUCCESS"
+                else ([], "UNAVAILABLE")
+            )
+            policy_result = specialist_results.get("policy_retrieval")
+            policy_items, policy_error = (
+                policy_result["result"]
+                if policy_result
+                and policy_result["status"] == "SUCCESS"
+                else ([], "POLICY_RETRIEVAL_UNAVAILABLE")
+            )
+
+            route_reasons = {
+                item.capability_id: item.rationale
+                for item in plan.output.selected_capabilities
+            } if plan else {}
+            specialist_summaries = {
+                "duplicate_detection": {
+                    "candidate_count": len(duplicate_items),
+                    "review_required": any(
+                        item["review_required"]
+                        for item in duplicate_items
+                    ),
+                },
+                "sanctions_screening": {
+                    "candidate_count": len(risk_candidates),
+                    "disposition": risk_disposition,
+                    "dataset_versions": {
+                        item.source: item.version for item in datasets
+                    },
+                },
+                "policy_retrieval": {
+                    "clause_count": len(policy_items),
+                    "status": (
+                        "SUCCESS" if policy_items else "BLOCKED"
+                    ),
+                    "error_code": policy_error,
+                },
+            }
+            for capability_id, result in specialist_results.items():
+                summary = specialist_summaries[capability_id]
+                blocked = (
+                    capability_id == "sanctions_screening"
+                    and risk_disposition == "UNAVAILABLE"
+                ) or (
+                    capability_id == "policy_retrieval"
+                    and not policy_items
+                )
+                status = (
+                    "FAILED"
+                    if result["status"] == "FAILED"
+                    else "BLOCKED"
+                    if blocked
+                    else "SUCCESS"
+                )
+                session.add(
+                    AgentStep(
+                        tenant_id=tenant_id,
+                        run_id=run_id,
+                        node_name=capability_id,
+                        attempt=run.state_version,
+                        status=status,
+                        input_summary={
+                            "route_reason": route_reasons.get(
+                                capability_id,
+                                "Mandatory safety investigation retained after planner failure.",
+                            ),
+                            "dependencies": (
+                                ["document_intelligence"]
+                                if capability_id
+                                in {
+                                    "duplicate_detection",
+                                    "sanctions_screening",
+                                }
+                                else ["goal_planner"]
+                            ),
+                            "started_at": result[
+                                "started_at"
+                            ].isoformat(),
+                        },
+                        output_summary={
+                            **summary,
+                            "completed_at": result[
+                                "completed_at"
+                            ].isoformat(),
+                        },
+                        error=(
+                            result["error"]
+                            if result["status"] == "FAILED"
+                            else {
+                                "error_code": summary.get("error_code"),
+                                "retryable": (
+                                    capability_id == "policy_retrieval"
+                                    and not policy_items
+                                ),
+                            }
+                        ),
+                        latency_ms=result["latency_ms"],
+                    )
+                )
+
+            for item in duplicate_items:
+                session.add(DuplicateCandidateRecord(
+                    tenant_id=tenant_id, case_id=case_id,
+                    vendor_id=uuid.UUID(item["vendor_id"]),
+                    score=item["score"], signals=item["signals"],
+                    review_required=item["review_required"],
+                ))
             session.add(RiskCheck(
                 tenant_id=tenant_id, case_id=case_id, provider="LOCAL_OFFICIAL_LISTS",
                 dataset_versions={item.source: item.version for item in datasets},
@@ -192,19 +508,23 @@ async def run_analysis(envelope: dict) -> None:
                 },
             ))
 
-            policy_query = "new vendor onboarding required documents bank details sanctions screening human approval"
-            policy_items, policy_error = await retrieve_policy(tenant_id, policy_query)
-
             unresolved = []
             if not legal_name:
                 unresolved.append("legal_name")
             critical_unverified = [field.field_name for field in fields_rows if field.field_name in {"tax_id", "bank_account"} and not field.human_verified and (field.confidence or 0) < 0.90]
             unresolved.extend(critical_unverified)
             blockers = []
+            if (
+                duplicate_result
+                and duplicate_result["status"] == "FAILED"
+            ):
+                blockers.append("DUPLICATE_DETECTION_FAILED")
             if risk_disposition == "UNAVAILABLE":
                 blockers.append("SANCTIONS_DATA_UNAVAILABLE")
             if not policy_items:
                 blockers.append(policy_error or "INSUFFICIENT_POLICY_EVIDENCE")
+            if planner_error:
+                blockers.append(planner_error.error_code)
             reason_codes = list(blockers)
             if any(item["review_required"] for item in duplicate_items):
                 reason_codes.append("POSSIBLE_DUPLICATE")
@@ -302,11 +622,23 @@ async def run_analysis(envelope: dict) -> None:
                 "deterministic_packet": graph_packet,
                 "current_stage": "deterministic_checks_complete",
             }
-            async with tenant_workflow(str(tenant_id)) as graph:
-                graph_result = await graph.ainvoke(
-                    graph_state,
-                    workflow_config(run.thread_id),
-                )
+            if planner_error:
+                graph_result = {
+                    **graph_state,
+                    "current_stage": "goal_planner_blocked",
+                    "outcome": "BLOCKED",
+                    "blocker": {
+                        "error_code": planner_error.error_code,
+                        "retryable": planner_error.retryable,
+                        "upgrade_required": planner_error.upgrade_required,
+                    },
+                }
+            else:
+                async with tenant_workflow(str(tenant_id)) as graph:
+                    graph_result = await graph.ainvoke(
+                        graph_state,
+                        workflow_config(run.thread_id),
+                    )
 
             for node_name, result_key in (
                 ("gemini_contradiction", "contradiction_result"),
@@ -440,6 +772,15 @@ async def run_analysis(envelope: dict) -> None:
                 )
             run.state_json = {
                 "evidence_hash": evidence_hash,
+                "plan": plan.as_dict() if plan else {
+                    "status": "FAILED",
+                    "error_code": planner_error.error_code
+                    if planner_error
+                    else "UNKNOWN",
+                    "preserved_mandatory_work": sorted(
+                        selected_capabilities
+                    ),
+                },
                 "recommendation": recommendation,
                 "reason_codes": reason_codes,
                 "unresolved_items": unresolved,

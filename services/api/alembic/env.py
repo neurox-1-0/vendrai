@@ -20,7 +20,11 @@ if config.config_file_name is not None:
 # from myapp import mymodel
 # target_metadata = mymodel.Base.metadata
 target_metadata = Base.metadata
-sync_database_url = settings.DATABASE_URL.replace("postgresql+asyncpg://", "postgresql+psycopg2://")
+sync_database_url = (
+    settings.DATABASE_URL
+    .replace("postgresql+asyncpg://", "postgresql+psycopg2://")
+    .replace("sqlite+aiosqlite://", "sqlite://")
+)
 config.set_main_option("sqlalchemy.url", sync_database_url.replace("%", "%%"))
 
 # other values from the config, defined by the needs of env.py,

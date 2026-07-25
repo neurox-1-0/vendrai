@@ -42,6 +42,121 @@
         "title": "ActionAccepted",
         "type": "object"
       },
+      "AgentStepResponse": {
+        "properties": {
+          "agent_kind": {
+            "enum": [
+              "PLANNER",
+              "SPECIALIST",
+              "REASONING",
+              "VERIFIER",
+              "HUMAN",
+              "EXECUTION"
+            ],
+            "title": "Agent Kind",
+            "type": "string"
+          },
+          "attempt": {
+            "title": "Attempt",
+            "type": "integer"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "dependencies": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Dependencies",
+            "type": "array"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "error": {
+            "additionalProperties": true,
+            "title": "Error",
+            "type": "object"
+          },
+          "input_summary": {
+            "additionalProperties": true,
+            "title": "Input Summary",
+            "type": "object"
+          },
+          "latency_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latency Ms"
+          },
+          "node_name": {
+            "title": "Node Name",
+            "type": "string"
+          },
+          "output_summary": {
+            "additionalProperties": true,
+            "title": "Output Summary",
+            "type": "object"
+          },
+          "route_reason": {
+            "title": "Route Reason",
+            "type": "string"
+          },
+          "run_id": {
+            "format": "uuid",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "step_id": {
+            "format": "uuid",
+            "title": "Step Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "step_id",
+          "run_id",
+          "node_name",
+          "display_name",
+          "agent_kind",
+          "attempt",
+          "status",
+          "route_reason",
+          "dependencies",
+          "input_summary",
+          "output_summary",
+          "error",
+          "latency_ms",
+          "started_at",
+          "completed_at"
+        ],
+        "title": "AgentStepResponse",
+        "type": "object"
+      },
       "ApprovalDecisionRequest": {
         "properties": {
           "comment": {
@@ -457,6 +572,350 @@
           "created_at"
         ],
         "title": "ClarificationTaskResponse",
+        "type": "object"
+      },
+      "CopilotCitation": {
+        "properties": {
+          "help_pack_version": {
+            "title": "Help Pack Version",
+            "type": "string"
+          },
+          "source_id": {
+            "title": "Source Id",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_id",
+          "title",
+          "help_pack_version"
+        ],
+        "title": "CopilotCitation",
+        "type": "object"
+      },
+      "CopilotFeedbackRequest": {
+        "properties": {
+          "rating": {
+            "enum": [
+              "HELPFUL",
+              "NOT_HELPFUL"
+            ],
+            "title": "Rating",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "maxLength": 800,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "rating"
+        ],
+        "title": "CopilotFeedbackRequest",
+        "type": "object"
+      },
+      "CopilotFeedbackResponse": {
+        "properties": {
+          "copilot_feedback_id": {
+            "format": "uuid",
+            "title": "Copilot Feedback Id",
+            "type": "string"
+          },
+          "copilot_message_id": {
+            "format": "uuid",
+            "title": "Copilot Message Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "help_pack_version": {
+            "title": "Help Pack Version",
+            "type": "string"
+          },
+          "rating": {
+            "enum": [
+              "HELPFUL",
+              "NOT_HELPFUL"
+            ],
+            "title": "Rating",
+            "type": "string"
+          },
+          "reason_masked": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason Masked"
+          }
+        },
+        "required": [
+          "copilot_feedback_id",
+          "copilot_message_id",
+          "rating",
+          "reason_masked",
+          "help_pack_version",
+          "created_at"
+        ],
+        "title": "CopilotFeedbackResponse",
+        "type": "object"
+      },
+      "CopilotMessageRequest": {
+        "properties": {
+          "case_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Case Id"
+          },
+          "current_path": {
+            "default": "/",
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Current Path",
+            "type": "string"
+          },
+          "question": {
+            "maxLength": 1200,
+            "minLength": 2,
+            "title": "Question",
+            "type": "string"
+          }
+        },
+        "required": [
+          "question"
+        ],
+        "title": "CopilotMessageRequest",
+        "type": "object"
+      },
+      "CopilotMessageResponse": {
+        "properties": {
+          "citations": {
+            "items": {
+              "$ref": "#/components/schemas/CopilotCitation"
+            },
+            "title": "Citations",
+            "type": "array"
+          },
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "copilot_message_id": {
+            "format": "uuid",
+            "title": "Copilot Message Id",
+            "type": "string"
+          },
+          "copilot_session_id": {
+            "format": "uuid",
+            "title": "Copilot Session Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "latency_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latency Ms"
+          },
+          "model_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Version"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "USER",
+              "ASSISTANT"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "ui_actions": {
+            "items": {
+              "$ref": "#/components/schemas/CopilotUIAction"
+            },
+            "title": "Ui Actions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "copilot_message_id",
+          "copilot_session_id",
+          "role",
+          "content",
+          "citations",
+          "ui_actions",
+          "provider",
+          "model_version",
+          "latency_ms",
+          "error_code",
+          "created_at"
+        ],
+        "title": "CopilotMessageResponse",
+        "type": "object"
+      },
+      "CopilotSessionCreate": {
+        "properties": {
+          "case_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Case Id"
+          },
+          "current_path": {
+            "default": "/",
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Current Path",
+            "type": "string"
+          }
+        },
+        "title": "CopilotSessionCreate",
+        "type": "object"
+      },
+      "CopilotSessionResponse": {
+        "properties": {
+          "context_case_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Case Id"
+          },
+          "copilot_session_id": {
+            "format": "uuid",
+            "title": "Copilot Session Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "help_pack_version": {
+            "title": "Help Pack Version",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "copilot_session_id",
+          "context_case_id",
+          "title",
+          "help_pack_version",
+          "status",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "CopilotSessionResponse",
+        "type": "object"
+      },
+      "CopilotUIAction": {
+        "properties": {
+          "action_type": {
+            "enum": [
+              "NAVIGATE",
+              "SPOTLIGHT",
+              "OPEN_PANEL",
+              "SET_FILTER",
+              "START_TOUR"
+            ],
+            "title": "Action Type",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action_type",
+          "target",
+          "label"
+        ],
+        "title": "CopilotUIAction",
         "type": "object"
       },
       "DocumentPageResponse": {
@@ -1167,6 +1626,138 @@
         "title": "PolicyUploadRequest",
         "type": "object"
       },
+      "RunDiagnosticsResponse": {
+        "properties": {
+          "decision_summary": {
+            "additionalProperties": true,
+            "title": "Decision Summary",
+            "type": "object"
+          },
+          "graph": {
+            "$ref": "#/components/schemas/RunGraphResponse"
+          },
+          "integrity": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Integrity",
+            "type": "object"
+          },
+          "versions": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Versions",
+            "type": "object"
+          }
+        },
+        "required": [
+          "graph",
+          "versions",
+          "integrity",
+          "decision_summary"
+        ],
+        "title": "RunDiagnosticsResponse",
+        "type": "object"
+      },
+      "RunGraphEdge": {
+        "properties": {
+          "relation": {
+            "default": "DEPENDS_ON",
+            "enum": [
+              "DEPENDS_ON",
+              "ROUTES_TO"
+            ],
+            "title": "Relation",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "target"
+        ],
+        "title": "RunGraphEdge",
+        "type": "object"
+      },
+      "RunGraphResponse": {
+        "properties": {
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/RunGraphEdge"
+            },
+            "title": "Edges",
+            "type": "array"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/AgentStepResponse"
+            },
+            "title": "Nodes",
+            "type": "array"
+          },
+          "objective": {
+            "title": "Objective",
+            "type": "string"
+          },
+          "plan": {
+            "additionalProperties": true,
+            "title": "Plan",
+            "type": "object"
+          },
+          "run": {
+            "$ref": "#/components/schemas/RunResponse"
+          },
+          "selected_path": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Selected Path",
+            "type": "array"
+          },
+          "timing": {
+            "$ref": "#/components/schemas/RunTimingSummary"
+          }
+        },
+        "required": [
+          "run",
+          "objective",
+          "selected_path",
+          "plan",
+          "nodes",
+          "edges",
+          "timing"
+        ],
+        "title": "RunGraphResponse",
+        "type": "object"
+      },
       "RunResponse": {
         "properties": {
           "case_id": {
@@ -1234,6 +1825,52 @@
           "updated_at"
         ],
         "title": "RunResponse",
+        "type": "object"
+      },
+      "RunTimingSummary": {
+        "properties": {
+          "active_compute_ms": {
+            "title": "Active Compute Ms",
+            "type": "integer"
+          },
+          "critical_path_ms": {
+            "title": "Critical Path Ms",
+            "type": "integer"
+          },
+          "human_waiting_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Human Waiting Ms"
+          },
+          "parallel_time_saved_ms": {
+            "title": "Parallel Time Saved Ms",
+            "type": "integer"
+          },
+          "total_elapsed_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Elapsed Ms"
+          }
+        },
+        "required": [
+          "total_elapsed_ms",
+          "active_compute_ms",
+          "critical_path_ms",
+          "parallel_time_saved_ms"
+        ],
+        "title": "RunTimingSummary",
         "type": "object"
       },
       "SanctionsDatasetResponse": {
@@ -4415,6 +5052,590 @@
         ]
       }
     },
+    "/api/v1/copilot/feedback": {
+      "get": {
+        "operationId": "list_feedback_api_v1_copilot_feedback_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-dev-tenant-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Dev-Tenant-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-dev-user-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Dev-User-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-dev-roles",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Dev-Roles"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CopilotFeedbackResponse"
+                  },
+                  "title": "Response List Feedback Api V1 Copilot Feedback Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Feedback",
+        "tags": [
+          "copilot"
+        ]
+      }
+    },
+    "/api/v1/copilot/messages/{message_id}/feedback": {
+      "post": {
+        "operationId": "create_feedback_api_v1_copilot_messages__message_id__feedback_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "message_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Message Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 160,
+              "minLength": 8,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-dev-tenant-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Dev-Tenant-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-dev-user-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Dev-User-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-dev-roles",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Dev-Roles"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CopilotFeedbackRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CopilotFeedbackResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Feedback",
+        "tags": [
+          "copilot"
+        ]
+      }
+    },
+    "/api/v1/copilot/sessions": {
+      "post": {
+        "operationId": "create_session_api_v1_copilot_sessions_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 160,
+              "minLength": 8,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-dev-tenant-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Dev-Tenant-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-dev-user-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Dev-User-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-dev-roles",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Dev-Roles"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CopilotSessionCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CopilotSessionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Session",
+        "tags": [
+          "copilot"
+        ]
+      }
+    },
+    "/api/v1/copilot/sessions/{session_id}/messages": {
+      "get": {
+        "operationId": "list_messages_api_v1_copilot_sessions__session_id__messages_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-dev-tenant-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Dev-Tenant-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-dev-user-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Dev-User-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-dev-roles",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Dev-Roles"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CopilotMessageResponse"
+                  },
+                  "title": "Response List Messages Api V1 Copilot Sessions  Session Id  Messages Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Messages",
+        "tags": [
+          "copilot"
+        ]
+      },
+      "post": {
+        "operationId": "send_message_api_v1_copilot_sessions__session_id__messages_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 160,
+              "minLength": 8,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-dev-tenant-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Dev-Tenant-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-dev-user-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Dev-User-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-dev-roles",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Dev-Roles"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CopilotMessageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CopilotMessageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Send Message",
+        "tags": [
+          "copilot"
+        ]
+      }
+    },
     "/api/v1/documents/{document_id}": {
       "get": {
         "operationId": "get_document_api_v1_documents__document_id__get",
@@ -6274,6 +7495,114 @@
         ]
       }
     },
+    "/api/v1/runs/{run_id}/diagnostics": {
+      "get": {
+        "operationId": "get_run_diagnostics_api_v1_runs__run_id__diagnostics_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-dev-tenant-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Dev-Tenant-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-dev-user-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Dev-User-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-dev-roles",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Dev-Roles"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunDiagnosticsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Run Diagnostics",
+        "tags": [
+          "runs",
+          "events"
+        ]
+      }
+    },
     "/api/v1/runs/{run_id}/events": {
       "get": {
         "operationId": "stream_run_events_api_v1_runs__run_id__events_get",
@@ -6390,6 +7719,226 @@
           }
         },
         "summary": "Stream Run Events",
+        "tags": [
+          "runs",
+          "events"
+        ]
+      }
+    },
+    "/api/v1/runs/{run_id}/graph": {
+      "get": {
+        "operationId": "get_run_graph_api_v1_runs__run_id__graph_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-dev-tenant-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Dev-Tenant-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-dev-user-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Dev-User-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-dev-roles",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Dev-Roles"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunGraphResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Run Graph",
+        "tags": [
+          "runs",
+          "events"
+        ]
+      }
+    },
+    "/api/v1/runs/{run_id}/steps": {
+      "get": {
+        "operationId": "get_run_steps_api_v1_runs__run_id__steps_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-dev-tenant-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Dev-Tenant-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-dev-user-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Dev-User-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-dev-roles",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Dev-Roles"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AgentStepResponse"
+                  },
+                  "title": "Response Get Run Steps Api V1 Runs  Run Id  Steps Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Run Steps",
         "tags": [
           "runs",
           "events"

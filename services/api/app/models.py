@@ -252,6 +252,117 @@ class AgentStep(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class CopilotSession(Base, TimestampMixin):
+    __tablename__ = "copilot_sessions"
+    __table_args__ = (
+        Index(
+            "ix_copilot_sessions_tenant_user_updated",
+            "tenant_id",
+            "user_id",
+            "updated_at",
+        ),
+    )
+    copilot_session_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tenants.tenant_id"),
+        index=True,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.user_id"),
+        index=True,
+    )
+    context_case_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("cases.case_id", ondelete="SET NULL"),
+        index=True,
+    )
+    title: Mapped[str] = mapped_column(String(160), default="Application help")
+    help_pack_version: Mapped[str] = mapped_column(String(40))
+    status: Mapped[str] = mapped_column(String(30), default="ACTIVE")
+
+
+class CopilotMessage(Base):
+    __tablename__ = "copilot_messages"
+    __table_args__ = (
+        Index(
+            "ix_copilot_messages_tenant_session_created",
+            "tenant_id",
+            "copilot_session_id",
+            "created_at",
+        ),
+    )
+    copilot_message_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tenants.tenant_id"),
+        index=True,
+    )
+    copilot_session_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("copilot_sessions.copilot_session_id", ondelete="CASCADE"),
+        index=True,
+    )
+    role: Mapped[str] = mapped_column(String(20))
+    content_masked: Mapped[str] = mapped_column(Text)
+    citations: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONType,
+        default=list,
+    )
+    ui_actions: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONType,
+        default=list,
+    )
+    provider: Mapped[str] = mapped_column(String(40), default="LOCAL_CAG")
+    model_version: Mapped[str | None] = mapped_column(String(120))
+    latency_ms: Mapped[int | None]
+    error_code: Mapped[str | None] = mapped_column(String(80))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+
+
+class CopilotFeedback(Base):
+    __tablename__ = "copilot_feedback"
+    __table_args__ = (
+        UniqueConstraint("user_id", "copilot_message_id"),
+        Index(
+            "ix_copilot_feedback_tenant_created",
+            "tenant_id",
+            "created_at",
+        ),
+    )
+    copilot_feedback_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tenants.tenant_id"),
+        index=True,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.user_id"),
+        index=True,
+    )
+    copilot_message_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("copilot_messages.copilot_message_id", ondelete="CASCADE"),
+        index=True,
+    )
+    rating: Mapped[str] = mapped_column(String(20))
+    reason_masked: Mapped[str | None] = mapped_column(Text)
+    help_pack_version: Mapped[str] = mapped_column(String(40))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+
+
 class EpisodicMemory(Base, TimestampMixin):
     __tablename__ = "episodic_memories"
     tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.tenant_id"), index=True)

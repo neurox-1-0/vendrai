@@ -1,9 +1,10 @@
 import uuid
+from datetime import UTC, datetime
 
 import pytest
 from app.database import AsyncSessionLocal
 from app.main import app
-from app.models import AgentRun, ApprovalTask
+from app.models import AgentRun, AgentStep, ApprovalTask
 from httpx import ASGITransport, AsyncClient
 
 
@@ -206,6 +207,113 @@ async def test_approval_queues_are_scoped_to_assigned_role():
     assert [item["task_type"] for item in finance.json()] == [
         "BANK_CHANGE_REVIEW"
     ]
+
+
+@pytest.mark.asyncio
+async def test_run_graph_exposes_real_steps_timings_and_sanitized_diagnostics():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        created = await client.post(
+            "/api/v1/cases",
+            json={"title": "Observable supplier run"},
+            headers={"Idempotency-Key": "observable-run-case"},
+        )
+        case_id = uuid.UUID(created.json()["case_id"])
+        run_id = uuid.uuid4()
+        tenant_id = uuid.UUID("00000000-0000-0000-0000-000000000001")
+        async with AsyncSessionLocal() as session, session.begin():
+            session.add(
+                AgentRun(
+                    run_id=run_id,
+                    tenant_id=tenant_id,
+                    case_id=case_id,
+                    thread_id=f"observable:{run_id}",
+                    graph_name="vendor_onboarding",
+                    graph_version="2.0.0",
+                    status="RUNNING",
+                    current_node="gemini_contradiction",
+                    state_json={
+                        "plan": {
+                            "objective": "Verify a synthetic supplier.",
+                            "selected_capabilities": [
+                                "duplicate_detection",
+                                "sanctions_screening",
+                            ],
+                        },
+                        "evidence_hash": "a" * 64,
+                        "raw_ocr": "must not be returned",
+                    },
+                    model_name="gemini-test",
+                    prompt_version="planner-v1",
+                    started_at=datetime.now(UTC),
+                )
+            )
+            session.add_all(
+                [
+                    AgentStep(
+                        tenant_id=tenant_id,
+                        run_id=run_id,
+                        node_name="document_intelligence",
+                        attempt=1,
+                        status="SUCCESS",
+                        input_summary={
+                            "route_reason": "Documents are ready.",
+                            "bank_account": "secret",
+                        },
+                        output_summary={"page_count": 2},
+                        error={},
+                        latency_ms=120,
+                    ),
+                    AgentStep(
+                        tenant_id=tenant_id,
+                        run_id=run_id,
+                        node_name="duplicate_detection",
+                        attempt=1,
+                        status="SUCCESS",
+                        input_summary={
+                            "dependencies": ["document_intelligence"],
+                            "route_reason": "A legal name is available.",
+                        },
+                        output_summary={"candidate_count": 1},
+                        error={},
+                        latency_ms=80,
+                    ),
+                    AgentStep(
+                        tenant_id=tenant_id,
+                        run_id=run_id,
+                        node_name="sanctions_screening",
+                        attempt=1,
+                        status="SUCCESS",
+                        input_summary={
+                            "dependencies": ["document_intelligence"],
+                            "route_reason": "Identity evidence is available.",
+                        },
+                        output_summary={"disposition": "CLEAR"},
+                        error={},
+                        latency_ms=90,
+                    ),
+                ]
+            )
+        graph = await client.get(f"/api/v1/runs/{run_id}/graph")
+        diagnostics = await client.get(
+            f"/api/v1/runs/{run_id}/diagnostics",
+        )
+        forbidden = await client.get(
+            f"/api/v1/runs/{run_id}/diagnostics",
+            headers={"X-Dev-Roles": "requester"},
+        )
+    assert graph.status_code == 200, graph.text
+    body = graph.json()
+    assert body["objective"] == "Verify a synthetic supplier."
+    assert len(body["nodes"]) == 3
+    assert body["timing"]["active_compute_ms"] == 290
+    assert body["timing"]["critical_path_ms"] == 210
+    assert body["timing"]["parallel_time_saved_ms"] == 80
+    assert body["nodes"][0]["input_summary"]["bank_account"] == "<REDACTED>"
+    assert diagnostics.status_code == 200
+    assert diagnostics.json()["integrity"]["private_reasoning_persisted"] is False
+    assert "raw_ocr" not in diagnostics.json()["decision_summary"]
+    assert forbidden.status_code == 403
 
 
 @pytest.mark.asyncio
