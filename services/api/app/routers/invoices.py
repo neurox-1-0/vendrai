@@ -18,7 +18,6 @@ from app.schemas import (
 )
 from app.services.events import append_audit, append_case_event, enqueue_event
 
-
 router = APIRouter(prefix="/invoices", tags=["invoices"])
 Db = Annotated[AsyncSession, Depends(get_db)]
 IdempotencyKey = Annotated[str, Header(alias="Idempotency-Key", min_length=8, max_length=160)]
@@ -170,6 +169,26 @@ async def submit_invoice_compatibility(
     ).scalars().all()
     if len(documents) != len(document_ids):
         raise HTTPException(404, detail={"code": "DOCUMENT_NOT_FOUND"})
+    source_cases = (
+        await db.execute(
+            select(Case).where(
+                Case.tenant_id == principal.tenant_id,
+                Case.case_id.in_(
+                    {document.case_id for document in documents}
+                ),
+            )
+        )
+    ).scalars().all()
+    if (
+        len(source_cases) != len({document.case_id for document in documents})
+        or "admin" not in principal.roles
+        and any(
+            source_case.requester_user_id != principal.user_id
+            or source_case.status != CaseStatus.DRAFT
+            for source_case in source_cases
+        )
+    ):
+        raise HTTPException(404, detail={"code": "DOCUMENT_NOT_FOUND"})
     if any(document.processing_status not in {"QUARANTINED", "QUEUED", "PROCESSING", "READY"} for document in documents):
         raise HTTPException(409, detail={"code": "DOCUMENT_NOT_UPLOAD_COMPLETE"})
 
@@ -208,7 +227,7 @@ async def submit_invoice_compatibility(
         run_id=run_id,
         tenant_id=principal.tenant_id,
         case_id=case_id,
-        thread_id=f"case:{case_id}:v{case.current_version}",
+        thread_id=f"{principal.tenant_id}:invoice:{case_id}:{run_id}",
         graph_name="invoice_exception",
         status="QUEUED",
         current_node="document_processing",

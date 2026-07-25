@@ -6,18 +6,52 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import CurrentPrincipal
+from app.auth import CASE_READ_ROLES, CurrentPrincipal
 from app.config import settings
 from app.database import get_db
 from app.domain.cases import CaseStatus, assert_transition
-from app.domain.security import blind_index, encrypt_sensitive_value, normalize_vendor_name
-from app.models import Case, ClarificationTask, Document, ExtractedField, InvoiceRecord
-from app.schemas import ClarificationResponseRequest
+from app.domain.security import (
+    blind_index,
+    encrypt_sensitive_value,
+    normalize_vendor_name,
+)
+from app.models import (
+    AgentRun,
+    Case,
+    ClarificationTask,
+    Document,
+    ExtractedField,
+    InvoiceRecord,
+)
+from app.schemas import ClarificationResponseRequest, ClarificationTaskResponse
 from app.services.events import append_audit, append_case_event, enqueue_event
-
 
 router = APIRouter(prefix="/clarification-tasks", tags=["clarifications"])
 Db = Annotated[AsyncSession, Depends(get_db)]
+
+
+@router.get("", response_model=list[ClarificationTaskResponse])
+async def list_clarification_tasks(
+    db: Db,
+    principal: CurrentPrincipal,
+    task_status: str = "OPEN",
+):
+    principal.require_any(*CASE_READ_ROLES)
+    statement = (
+        select(ClarificationTask)
+        .join(Case, ClarificationTask.case_id == Case.case_id)
+        .where(
+            ClarificationTask.tenant_id == principal.tenant_id,
+            ClarificationTask.status == task_status,
+            Case.tenant_id == principal.tenant_id,
+        )
+        .order_by(ClarificationTask.created_at)
+    )
+    if principal.is_requester_only:
+        statement = statement.where(
+            Case.requester_user_id == principal.user_id
+        )
+    return list((await db.execute(statement)).scalars().all())
 
 
 @router.post("/{task_id}/responses")
@@ -44,7 +78,7 @@ async def respond(
     )
     if not case:
         raise HTTPException(404, detail={"code": "CLARIFICATION_TASK_NOT_FOUND"})
-    if principal.roles == {"requester"} and case.requester_user_id != principal.user_id:
+    if principal.is_requester_only and case.requester_user_id != principal.user_id:
         raise HTTPException(404, detail={"code": "CLARIFICATION_TASK_NOT_FOUND"})
     if if_match != body.expected_version or case.current_version != body.expected_version:
         raise HTTPException(409, detail={"code": "STALE_CASE_VERSION", "current_version": case.current_version})
@@ -114,16 +148,32 @@ async def respond(
     case.status = resume_status
     case.current_version += 1
     await append_case_event(db, tenant_id=principal.tenant_id, case_id=case.case_id, event_type="CLARIFICATION_ANSWERED", actor_type="USER", actor_id=str(principal.user_id), payload={"task_id": str(task_id)})
+    run = await db.get(AgentRun, task.run_id)
+    run_evidence_hash = (
+        run.state_json.get("evidence_hash")
+        if run and run.state_json
+        else None
+    )
     enqueue_event(
         db, tenant_id=principal.tenant_id, aggregate_type="case", aggregate_id=case.case_id,
         aggregate_version=case.current_version,
         event_type=(
-            "invoice.analysis.requested.v1"
+            "clarification.answered.v1"
+            if run_evidence_hash
+            else "invoice.analysis.requested.v1"
             if case.case_type == "INVOICE_EXCEPTION"
             else "agent.analysis.requested.v1"
         ),
         idempotency_key=f"clarification.response:{task_id}:{idempotency_key}",
-        payload={"case_id": str(case.case_id), "run_id": str(task.run_id)},
+        payload={
+            "case_id": str(case.case_id),
+            "run_id": str(task.run_id),
+            "task_id": str(task_id),
+            "decision": "CLARIFIED",
+            "evidence_hash": run_evidence_hash,
+            "expected_version": body.expected_version,
+            "actor_id": str(principal.user_id),
+        },
     )
     await append_audit(db, tenant_id=principal.tenant_id, case_id=case.case_id, actor_type="USER", actor_id=str(principal.user_id), action="CLARIFICATION_ANSWERED", resource_type="CLARIFICATION_TASK", resource_id=str(task_id), metadata={"answer_keys": sorted(body.answers)})
     return {"task_id": task_id, "status": task.status, "case_status": case.status}

@@ -2,7 +2,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -10,7 +10,6 @@ from app.auth import CurrentPrincipal
 from app.database import get_db
 from app.models import Notification
 from app.schemas import NotificationResponse
-
 
 router = APIRouter(prefix="/notifications", tags=["notifications"])
 Db = Annotated[AsyncSession, Depends(get_db)]
@@ -27,7 +26,15 @@ async def list_notifications(db: Db, principal: CurrentPrincipal):
 
 
 @router.post("/{notification_id}:read", response_model=NotificationResponse)
-async def mark_read(notification_id: uuid.UUID, db: Db, principal: CurrentPrincipal):
+async def mark_read(
+    notification_id: uuid.UUID,
+    db: Db,
+    principal: CurrentPrincipal,
+    _idempotency_key: Annotated[
+        str,
+        Header(alias="Idempotency-Key", min_length=8, max_length=160),
+    ],
+):
     notification = await db.scalar(select(Notification).where(
         Notification.notification_id == notification_id,
         Notification.tenant_id == principal.tenant_id,

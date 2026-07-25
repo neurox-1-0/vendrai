@@ -8,11 +8,10 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import CurrentPrincipal
+from app.auth import CASE_READ_ROLES, CurrentPrincipal
 from app.database import AsyncSessionLocal, get_db, set_tenant_context
 from app.models import AgentRun, Case, CaseEvent
 from app.schemas import EventResponse, RunResponse
-
 
 router = APIRouter(tags=["runs", "events"])
 Db = Annotated[AsyncSession, Depends(get_db)]
@@ -20,16 +19,29 @@ Db = Annotated[AsyncSession, Depends(get_db)]
 
 @router.get("/runs/{run_id}", response_model=RunResponse)
 async def get_run(run_id: uuid.UUID, db: Db, principal: CurrentPrincipal):
+    principal.require_any(*CASE_READ_ROLES)
     run = await db.scalar(select(AgentRun).where(AgentRun.run_id == run_id, AgentRun.tenant_id == principal.tenant_id))
     if not run:
+        raise HTTPException(404, detail={"code": "RUN_NOT_FOUND"})
+    case = await db.get(Case, run.case_id)
+    if (
+        not case
+        or principal.is_requester_only
+        and case.requester_user_id != principal.user_id
+    ):
         raise HTTPException(404, detail={"code": "RUN_NOT_FOUND"})
     return run
 
 
 @router.get("/cases/{case_id}/events", response_model=list[EventResponse])
 async def list_case_events(case_id: uuid.UUID, db: Db, principal: CurrentPrincipal, after: int = 0):
-    case = await db.scalar(select(Case.case_id).where(Case.case_id == case_id, Case.tenant_id == principal.tenant_id))
-    if not case:
+    principal.require_any(*CASE_READ_ROLES)
+    case = await db.scalar(select(Case).where(Case.case_id == case_id, Case.tenant_id == principal.tenant_id))
+    if (
+        not case
+        or principal.is_requester_only
+        and case.requester_user_id != principal.user_id
+    ):
         raise HTTPException(404, detail={"code": "CASE_NOT_FOUND"})
     return list((await db.execute(
         select(CaseEvent).where(CaseEvent.case_id == case_id, CaseEvent.tenant_id == principal.tenant_id, CaseEvent.sequence > after).order_by(CaseEvent.sequence)
@@ -43,6 +55,7 @@ async def stream_run_events(
     principal: CurrentPrincipal,
     last_event_id: Annotated[str | None, Header(alias="Last-Event-ID")] = None,
 ):
+    principal.require_any(*CASE_READ_ROLES)
     async with AsyncSessionLocal() as verify_session:
         async with verify_session.begin():
             await set_tenant_context(verify_session, str(principal.tenant_id))
@@ -50,6 +63,13 @@ async def stream_run_events(
             if not run:
                 raise HTTPException(404, detail={"code": "RUN_NOT_FOUND"})
             case_id = run.case_id
+            case = await verify_session.get(Case, case_id)
+            if (
+                not case
+                or principal.is_requester_only
+                and case.requester_user_id != principal.user_id
+            ):
+                raise HTTPException(404, detail={"code": "RUN_NOT_FOUND"})
     try:
         cursor = int(last_event_id or 0)
     except ValueError:
