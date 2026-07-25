@@ -61,6 +61,14 @@ export default function Dashboard() {
   useEffect(() => {
     window.localStorage.setItem("neurox-work-queue-filters", JSON.stringify(filters));
   }, [filters]);
+  useEffect(() => {
+    const openPanel = (event: Event) => {
+      const panel = (event as CustomEvent<{ panel?: string }>).detail?.panel;
+      if (panel === "notifications") setShowNotifications(true);
+    };
+    window.addEventListener("neurox:open-panel", openPanel);
+    return () => window.removeEventListener("neurox:open-panel", openPanel);
+  }, []);
 
   return (
     <div className="min-h-full p-6 lg:p-12">
@@ -75,7 +83,7 @@ export default function Dashboard() {
             <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--color-muted)]" aria-hidden="true" />
             <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search cases" aria-label="Search cases" className="pl-11" />
           </div>
-          <div className="relative">
+          <div className="relative" data-panel-id="notifications">
             <Button type="button" variant="icon" onClick={() => setShowNotifications((value) => !value)} aria-label={`${unread} unread notifications`} aria-expanded={showNotifications}>
               <Bell className="h-5 w-5" />
               {unread > 0 && <span className="absolute right-1 top-1 min-w-5 rounded-full bg-red-600 px-1 text-[10px] text-white">{unread}</span>}

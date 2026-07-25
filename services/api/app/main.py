@@ -17,6 +17,7 @@ from app.routers import (
     audit_exports,
     cases,
     clarifications,
+    copilot,
     documents,
     evidence,
     invoices,
@@ -43,7 +44,7 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type", "Idempotency-Key", "If-Match", "Last-Event-ID", "X-Dev-Tenant-Id", "X-Dev-User-Id", "X-Dev-Roles"],
 )
 
-for router in (cases.router, documents.router, runs.router, approvals.router, reviews.router, work_queue.router, evidence.router, audit_exports.router, notifications.router, knowledge.router, clarifications.router, invoices.router, admin.router):
+for router in (cases.router, documents.router, runs.router, approvals.router, reviews.router, work_queue.router, evidence.router, audit_exports.router, notifications.router, knowledge.router, clarifications.router, invoices.router, copilot.router, admin.router):
     app.include_router(
         router,
         prefix=settings.API_PREFIX,

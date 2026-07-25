@@ -1,3 +1,5 @@
+import { getAccessToken } from "@/lib/auth-token";
+
 export type CaseStatus =
   | "DRAFT"
   | "SUBMITTED"
@@ -62,6 +64,108 @@ export interface EvidenceItem {
 }
 
 export interface EvidencePacket { items: EvidenceItem[]; evidence_hash: string | null }
+
+export interface AgentStep {
+  step_id: string;
+  run_id: string;
+  node_name: string;
+  display_name: string;
+  agent_kind: "PLANNER" | "SPECIALIST" | "REASONING" | "VERIFIER" | "HUMAN" | "EXECUTION";
+  attempt: number;
+  status: string;
+  route_reason: string;
+  dependencies: string[];
+  input_summary: Record<string, unknown>;
+  output_summary: Record<string, unknown>;
+  error: Record<string, unknown>;
+  latency_ms: number | null;
+  started_at: string;
+  completed_at: string | null;
+}
+
+export interface RunGraph {
+  run: {
+    run_id: string;
+    case_id: string;
+    thread_id: string;
+    graph_name: string;
+    graph_version: string;
+    status: string;
+    current_node: string | null;
+    state_version: number;
+    created_at: string;
+    updated_at: string;
+  };
+  objective: string;
+  selected_path: string[];
+  plan: Record<string, unknown>;
+  nodes: AgentStep[];
+  edges: Array<{
+    source: string;
+    target: string;
+    relation: "DEPENDS_ON" | "ROUTES_TO";
+  }>;
+  timing: {
+    total_elapsed_ms: number | null;
+    active_compute_ms: number;
+    critical_path_ms: number;
+    parallel_time_saved_ms: number;
+    human_waiting_ms: number | null;
+  };
+}
+
+export interface RunDiagnostics {
+  graph: RunGraph;
+  versions: Record<string, string | null>;
+  integrity: Record<string, string | number | boolean | null>;
+  decision_summary: Record<string, unknown>;
+}
+
+export interface CopilotSession {
+  copilot_session_id: string;
+  context_case_id: string | null;
+  title: string;
+  help_pack_version: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CopilotMessage {
+  copilot_message_id: string;
+  copilot_session_id: string;
+  role: "USER" | "ASSISTANT";
+  content: string;
+  citations: Array<{
+    source_id: string;
+    title: string;
+    help_pack_version: string;
+  }>;
+  ui_actions: Array<{
+    action_type:
+      | "NAVIGATE"
+      | "SPOTLIGHT"
+      | "OPEN_PANEL"
+      | "SET_FILTER"
+      | "START_TOUR";
+    target: string;
+    label: string;
+  }>;
+  provider: string;
+  model_version: string | null;
+  latency_ms: number | null;
+  error_code: string | null;
+  created_at: string;
+}
+
+export interface CopilotFeedback {
+  copilot_feedback_id: string;
+  copilot_message_id: string;
+  rating: "HELPFUL" | "NOT_HELPFUL";
+  reason_masked: string | null;
+  help_pack_version: string;
+  created_at: string;
+}
 
 export interface InvoiceLineEvidence {
   line_number: number;
@@ -271,6 +375,58 @@ export const api = {
   listCases: () => request<CaseList>("/cases"),
   getCase: (caseId: string) => request<VendorCase>(`/cases/${caseId}`),
   getEvents: (caseId: string) => request<CaseEvent[]>(`/cases/${caseId}/events`),
+  getRunGraph: (runId: string) => request<RunGraph>(`/runs/${runId}/graph`),
+  getRunDiagnostics: (runId: string) =>
+    request<RunDiagnostics>(`/runs/${runId}/diagnostics`),
+  createCopilotSession: (currentPath: string, caseId?: string) =>
+    request<CopilotSession>("/copilot/sessions", {
+      method: "POST",
+      headers: {
+        "Idempotency-Key": idempotencyKey("copilot-session"),
+      },
+      body: JSON.stringify({
+        current_path: currentPath,
+        case_id: caseId ?? null,
+      }),
+    }),
+  listCopilotMessages: (sessionId: string) =>
+    request<CopilotMessage[]>(
+      `/copilot/sessions/${sessionId}/messages`,
+    ),
+  sendCopilotMessage: (
+    sessionId: string,
+    question: string,
+    currentPath: string,
+    caseId?: string,
+  ) =>
+    request<CopilotMessage>(
+      `/copilot/sessions/${sessionId}/messages`,
+      {
+        method: "POST",
+        headers: {
+          "Idempotency-Key": idempotencyKey("copilot-message"),
+        },
+        body: JSON.stringify({
+          question,
+          current_path: currentPath,
+          case_id: caseId ?? null,
+        }),
+      },
+    ),
+  sendCopilotFeedback: (
+    messageId: string,
+    rating: CopilotFeedback["rating"],
+  ) =>
+    request<CopilotFeedback>(
+      `/copilot/messages/${messageId}/feedback`,
+      {
+        method: "POST",
+        headers: {
+          "Idempotency-Key": idempotencyKey("copilot-feedback"),
+        },
+        body: JSON.stringify({ rating, reason: null }),
+      },
+    ),
   getEvidence: (caseId: string) => request<EvidencePacket>(`/cases/${caseId}/evidence`),
   listCaseDocuments: (caseId: string) => request<CaseDocument[]>(`/cases/${caseId}/documents`),
   listDocumentPages: (documentId: string) => request<DocumentPage[]>(`/documents/${documentId}/pages`),
@@ -408,4 +564,3 @@ export const api = {
     headers: { "Idempotency-Key": idempotencyKey("notification-read") },
   }),
 };
-import { getAccessToken } from "@/lib/auth-token";

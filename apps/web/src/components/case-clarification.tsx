@@ -42,7 +42,10 @@ export function CaseClarification({
   );
 
   return (
-    <Card className="border border-amber-300 bg-amber-50/70">
+    <Card
+      data-tour-id="case.clarification"
+      className="border border-amber-300 bg-amber-50/70"
+    >
       <div className="mb-5 flex items-center gap-3">
         <CircleHelp className="h-6 w-6 text-amber-800" />
         <div>

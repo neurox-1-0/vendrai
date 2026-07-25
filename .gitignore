@@ -25,6 +25,8 @@ Database Schema/
 !MASTER_TODO.md
 !docs/
 !docs/backup-restore-runbook.md
+!docs/competition/
+!docs/competition/*.md
 
 # Node/Python specific ignores
 node_modules/

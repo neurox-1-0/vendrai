@@ -5,6 +5,7 @@ import Keycloak from "keycloak-js";
 import { createContext, useContext, useEffect, useState } from "react";
 
 import { setAccessToken } from "@/lib/auth-token";
+import { ApplicationCopilot } from "@/components/application-copilot";
 
 interface AuthContextValue {
   roles: ReadonlySet<string>;
@@ -74,7 +75,10 @@ export function Providers({ children }: { children: React.ReactNode }) {
   if (!authReady) return <main className="grid min-h-screen place-items-center" aria-live="polite">Connecting to secure identity provider…</main>;
   return (
     <AuthContext.Provider value={{ roles }}>
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+      <QueryClientProvider client={queryClient}>
+        {children}
+        <ApplicationCopilot />
+      </QueryClientProvider>
     </AuthContext.Provider>
   );
 }

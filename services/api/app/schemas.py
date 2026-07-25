@@ -164,6 +164,151 @@ class RunResponse(BaseModel):
     updated_at: datetime
 
 
+class AgentStepResponse(BaseModel):
+    step_id: UUID
+    run_id: UUID
+    node_name: str
+    display_name: str
+    agent_kind: Literal["PLANNER", "SPECIALIST", "REASONING", "VERIFIER", "HUMAN", "EXECUTION"]
+    attempt: int
+    status: str
+    route_reason: str
+    dependencies: list[str]
+    input_summary: dict[str, Any]
+    output_summary: dict[str, Any]
+    error: dict[str, Any]
+    latency_ms: int | None
+    started_at: datetime
+    completed_at: datetime | None
+
+
+class RunGraphEdge(BaseModel):
+    source: str
+    target: str
+    relation: Literal["DEPENDS_ON", "ROUTES_TO"] = "DEPENDS_ON"
+
+
+class RunTimingSummary(BaseModel):
+    total_elapsed_ms: int | None
+    active_compute_ms: int
+    critical_path_ms: int
+    parallel_time_saved_ms: int
+    human_waiting_ms: int | None = None
+
+
+class RunGraphResponse(BaseModel):
+    run: RunResponse
+    objective: str
+    selected_path: list[str]
+    plan: dict[str, Any]
+    nodes: list[AgentStepResponse]
+    edges: list[RunGraphEdge]
+    timing: RunTimingSummary
+
+
+class RunDiagnosticsResponse(BaseModel):
+    graph: RunGraphResponse
+    versions: dict[str, str | None]
+    integrity: dict[str, str | int | bool | None]
+    decision_summary: dict[str, Any]
+
+
+class CopilotSessionCreate(BaseModel):
+    current_path: str = Field(default="/", min_length=1, max_length=300)
+    case_id: UUID | None = None
+
+    @field_validator("current_path")
+    @classmethod
+    def validate_internal_path(cls, value: str) -> str:
+        if not value.startswith("/") or value.startswith("//"):
+            raise ValueError("Only internal application paths are allowed")
+        return value
+
+
+class CopilotSessionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    copilot_session_id: UUID
+    context_case_id: UUID | None
+    title: str
+    help_pack_version: str
+    status: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class CopilotMessageRequest(BaseModel):
+    question: str = Field(min_length=2, max_length=1200)
+    current_path: str = Field(default="/", min_length=1, max_length=300)
+    case_id: UUID | None = None
+
+    @field_validator("question")
+    @classmethod
+    def normalize_question(cls, value: str) -> str:
+        return " ".join(value.split())
+
+    @field_validator("current_path")
+    @classmethod
+    def validate_internal_path(cls, value: str) -> str:
+        if not value.startswith("/") or value.startswith("//"):
+            raise ValueError("Only internal application paths are allowed")
+        return value
+
+
+class CopilotCitation(BaseModel):
+    source_id: str
+    title: str
+    help_pack_version: str
+
+
+class CopilotUIAction(BaseModel):
+    action_type: Literal[
+        "NAVIGATE",
+        "SPOTLIGHT",
+        "OPEN_PANEL",
+        "SET_FILTER",
+        "START_TOUR",
+    ]
+    target: str
+    label: str
+
+
+class CopilotMessageResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    copilot_message_id: UUID
+    copilot_session_id: UUID
+    role: Literal["USER", "ASSISTANT"]
+    content: str
+    citations: list[CopilotCitation]
+    ui_actions: list[CopilotUIAction]
+    provider: str
+    model_version: str | None
+    latency_ms: int | None
+    error_code: str | None
+    created_at: datetime
+
+
+class CopilotFeedbackRequest(BaseModel):
+    rating: Literal["HELPFUL", "NOT_HELPFUL"]
+    reason: str | None = Field(default=None, max_length=800)
+
+    @field_validator("reason")
+    @classmethod
+    def normalize_and_mask_reason(cls, value: str | None) -> str | None:
+        if not value:
+            return None
+        return mask_sensitive_text(" ".join(value.split()))
+
+
+class CopilotFeedbackResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    copilot_feedback_id: UUID
+    copilot_message_id: UUID
+    rating: Literal["HELPFUL", "NOT_HELPFUL"]
+    reason_masked: str | None
+    help_pack_version: str
+    created_at: datetime
+
+
 class ApprovalTaskResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     approval_task_id: UUID

@@ -80,7 +80,7 @@ export function CaseDocumentReview({
   });
 
   return (
-    <Card>
+    <Card data-tour-id="case.document-review">
       <div className="mb-6 flex items-center gap-3">
         <FileText className="h-6 w-6 text-[var(--color-accent)]" />
         <div>

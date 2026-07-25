@@ -3,7 +3,9 @@ import re
 import socket
 import struct
 import tempfile
+import time
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -15,7 +17,14 @@ from app.domain.security import (
     encrypt_sensitive_value,
     normalize_vendor_name,
 )
-from app.models import Case, Document, DocumentPage, ExtractedField, InboxReceipt
+from app.models import (
+    AgentStep,
+    Case,
+    Document,
+    DocumentPage,
+    ExtractedField,
+    InboxReceipt,
+)
 from app.services.events import append_case_event, enqueue_event
 from app.services.storage import (
     copy_local_clean_object,
@@ -302,6 +311,8 @@ async def process_document_event(envelope: dict) -> None:
                 raise RuntimeError("DOCUMENT_NOT_FOUND_OR_TENANT_MISMATCH")
             case = await session.scalar(select(Case).where(Case.case_id == document.case_id).with_for_update())
             case_was_draft = case.status == CaseStatus.DRAFT
+            processing_started_at = datetime.now(UTC)
+            processing_started = time.perf_counter()
             clean, scan_result, pages, parser_version, clean_storage_key = await asyncio.to_thread(
                 process_stored_document,
                 document,
@@ -370,7 +381,46 @@ async def process_document_event(envelope: dict) -> None:
                 if not run_id:
                     from app.models import AgentRun
                     run_id = await session.scalar(select(AgentRun.run_id).where(AgentRun.case_id == case.case_id).order_by(AgentRun.created_at.desc()))
-                
+                if not run_id:
+                    raise RuntimeError("AGENT_RUN_NOT_FOUND")
+                processing_completed_at = datetime.now(UTC)
+                session.add(
+                    AgentStep(
+                        tenant_id=tenant_id,
+                        run_id=uuid.UUID(str(run_id)),
+                        node_name="document_processing",
+                        attempt=1,
+                        status="SUCCESS",
+                        input_summary={
+                            "route_reason": (
+                                "Uploaded evidence must be scanned, parsed, "
+                                "masked, and validated locally."
+                            ),
+                            "dependencies": [],
+                            "started_at": (
+                                processing_started_at.isoformat()
+                            ),
+                        },
+                        output_summary={
+                            "document_id": str(document_id),
+                            "page_count": len(pages),
+                            "parser_version": parser_version,
+                            "malware_status": document.malware_status,
+                            "completed_at": (
+                                processing_completed_at.isoformat()
+                            ),
+                        },
+                        error={},
+                        latency_ms=round(
+                            (
+                                time.perf_counter()
+                                - processing_started
+                            )
+                            * 1000
+                        ),
+                    )
+                )
+
                 if case.case_type == "INVOICE_EXCEPTION":
                     case.status = CaseStatus.INVOICE_MATCHING
                     enqueue_event(
