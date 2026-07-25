@@ -19,6 +19,8 @@ export type CaseStatus =
   | "EXCEPTION_CLASSIFIED"
   | "TOLERANCE_CHECK"
   | "AUTO_RESOLVED"
+  | "BLOCKED_DUPLICATE"
+  | "HOLD"
   | "FAILED"
   | "CANCELLED";
 
@@ -60,6 +62,51 @@ export interface EvidenceItem {
 
 export interface EvidencePacket { items: EvidenceItem[]; evidence_hash: string | null }
 
+export interface InvoiceLineEvidence {
+  line_number: number;
+  description: string;
+  quantity: number;
+  unit_price: number;
+  amount: number;
+}
+
+export interface InvoiceMatchLine {
+  invoice_line: InvoiceLineEvidence;
+  po_line: { quantity?: number; unit_price?: number } | null;
+  grn_line: { quantity_received?: number; received?: number } | null;
+  price_variance: number;
+  quantity_variance: number;
+  match_status: string;
+}
+
+export interface InvoiceEvidencePacket {
+  recommendation?: string;
+  reason_codes?: string[];
+  extracted_invoice?: {
+    currency?: string;
+    invoice_number?: string;
+    total_amount?: number;
+    line_items?: InvoiceLineEvidence[];
+  };
+  match_result?: {
+    match_status?: string;
+    overall_variance_amount?: number;
+    overall_variance_pct?: number;
+    line_matches?: InvoiceMatchLine[];
+  };
+  exception?: Array<{
+    exception_type: string;
+    severity: string;
+    mismatch_details?: { message?: string; [key: string]: unknown };
+  }>;
+  tolerance?: {
+    within_tolerance?: boolean;
+    threshold_amount?: number;
+    threshold_pct?: number;
+  };
+  [key: string]: unknown;
+}
+
 export interface ApprovalTask {
   approval_task_id: string;
   case_id: string;
@@ -68,7 +115,7 @@ export interface ApprovalTask {
   status: string;
   assigned_role: string;
   proposed_action: Record<string, unknown>;
-  evidence_packet: Record<string, unknown>;
+  evidence_packet: InvoiceEvidencePacket;
   evidence_hash: string;
   case_version: number;
   created_at: string;
@@ -181,6 +228,18 @@ export const api = {
       method: "POST",
       headers: { "Idempotency-Key": idempotencyKey("case") },
       body: JSON.stringify({ title, priority }),
+    }),
+  createInvoiceDraft: (
+    invoice_number: string,
+    priority: VendorCase["priority"] = "NORMAL",
+    po_number?: string,
+    vendor_id?: string,
+    currency = "LKR",
+  ) =>
+    request<VendorCase>("/invoices:draft", {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey("invoice-draft") },
+      body: JSON.stringify({ invoice_number, priority, po_number, vendor_id, currency }),
     }),
   submitInvoice: (
     invoice_number: string,

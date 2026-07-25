@@ -22,6 +22,8 @@ const presentation: Record<CaseStatus, { label: string; classes: string; icon: t
   EXCEPTION_CLASSIFIED: { label: "Classifying exception", classes: "bg-fuchsia-100 text-fuchsia-900", icon: RotateCw },
   TOLERANCE_CHECK: { label: "Tolerance check", classes: "bg-teal-100 text-teal-900", icon: RotateCw },
   AUTO_RESOLVED: { label: "Auto-resolved", classes: "bg-emerald-100 text-emerald-900", icon: CheckCircle2 },
+  BLOCKED_DUPLICATE: { label: "Duplicate blocked", classes: "bg-red-100 text-red-900", icon: ShieldAlert },
+  HOLD: { label: "Payment hold", classes: "bg-orange-100 text-orange-900", icon: AlertTriangle },
   FAILED: { label: "Failed", classes: "bg-red-100 text-red-900", icon: XCircle },
   CANCELLED: { label: "Cancelled", classes: "bg-slate-200 text-slate-800", icon: XCircle },
 };

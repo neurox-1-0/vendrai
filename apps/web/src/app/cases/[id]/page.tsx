@@ -54,7 +54,7 @@ export default function CaseDetail() {
   if (caseQuery.isLoading) return <p className="p-12" aria-live="polite">Loading case…</p>;
   if (caseQuery.isError || !caseQuery.data) return <p className="p-12 text-red-800" role="alert">Unable to load case: {caseQuery.error?.message}</p>;
   const currentCase = caseQuery.data;
-  const currencyCode = (task?.evidence_packet?.extracted_invoice as any)?.currency || 'USD';
+  const currencyCode = task?.evidence_packet.extracted_invoice?.currency || "USD";
   const formatCurrency = (amount: number | string | undefined | null) => {
     if (amount == null || amount === "-") return "-";
     const num = typeof amount === 'string' ? parseFloat(amount) : amount;
@@ -117,10 +117,10 @@ export default function CaseDetail() {
                   <div>
                     <h3 className="font-bold text-sm mb-2 text-red-600">Detected Exceptions</h3>
                     <ul className="space-y-2">
-                      {(task.evidence_packet.exception as any[]).map((exc, i) => (
-                        <li key={i} className="text-sm bg-red-50 p-3 rounded-lg border border-red-100">
-                          <span className="font-bold">{exc.exception_type}</span> ({exc.severity})
-                          <p className="text-xs mt-1">{exc.mismatch_details?.message}</p>
+                      {task.evidence_packet.exception.map((exception, index) => (
+                        <li key={`${exception.exception_type}-${index}`} className="text-sm bg-red-50 p-3 rounded-lg border border-red-100">
+                          <span className="font-bold">{exception.exception_type}</span> ({exception.severity})
+                          <p className="text-xs mt-1">{exception.mismatch_details?.message}</p>
                         </li>
                       ))}
                     </ul>
@@ -130,8 +130,8 @@ export default function CaseDetail() {
                 {/* 3-Way Match Result */}
                 {!!task.evidence_packet.match_result && (
                   <div>
-                    <h3 className="font-bold text-sm mb-2">3-Way Match Result: {(task.evidence_packet.match_result as any).match_status}</h3>
-                    <p className="text-sm text-[var(--color-muted)]">Total Variance: {formatCurrency((task.evidence_packet.match_result as any).overall_variance_amount)} ({(task.evidence_packet.match_result as any).overall_variance_pct?.toFixed(2)}%)</p>
+                    <h3 className="font-bold text-sm mb-2">3-Way Match Result: {task.evidence_packet.match_result.match_status}</h3>
+                    <p className="text-sm text-[var(--color-muted)]">Total Variance: {formatCurrency(task.evidence_packet.match_result.overall_variance_amount)} ({task.evidence_packet.match_result.overall_variance_pct?.toFixed(2)}%)</p>
                     
                     <div className="mt-4 overflow-x-auto">
                       <table className="w-full text-sm text-left">
@@ -147,8 +147,8 @@ export default function CaseDetail() {
                           </tr>
                         </thead>
                         <tbody>
-                          {((task.evidence_packet.match_result as any).line_matches || []).map((m: any, i: number) => (
-                            <tr key={i} className="border-b">
+                          {(task.evidence_packet.match_result.line_matches || []).map((m, index) => (
+                            <tr key={`${m.invoice_line.line_number}-${index}`} className="border-b">
                               <td className="px-4 py-2">{m.invoice_line?.line_number}</td>
                               <td className="px-4 py-2">{m.invoice_line?.description}</td>
                               <td className="px-4 py-2">{m.invoice_line?.quantity}</td>
@@ -169,9 +169,9 @@ export default function CaseDetail() {
                   <div className="bg-slate-50 p-4 rounded-lg">
                     <h3 className="font-bold text-sm mb-1">Tolerance Check</h3>
                     <p className="text-sm">
-                      {(task.evidence_packet.tolerance as any).within_tolerance ? "✅ Within Tolerance" : "❌ Exceeds Tolerance"} 
+                      {task.evidence_packet.tolerance.within_tolerance ? "✅ Within Tolerance" : "❌ Exceeds Tolerance"}
                       <span className="text-xs text-[var(--color-muted)] ml-2">
-                        (Threshold: {formatCurrency((task.evidence_packet.tolerance as any).threshold_amount)}, {(task.evidence_packet.tolerance as any).threshold_pct}%)
+                        (Threshold: {formatCurrency(task.evidence_packet.tolerance.threshold_amount)}, {task.evidence_packet.tolerance.threshold_pct}%)
                       </span>
                     </p>
                   </div>
