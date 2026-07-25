@@ -1,6 +1,3 @@
-import pytest
-import uuid
-from app.domain.cases import CaseStatus
 from app.domain.invoices import check_tolerance
 from app.workers.invoice_agent import check_missing_po, check_tax_mismatch
 

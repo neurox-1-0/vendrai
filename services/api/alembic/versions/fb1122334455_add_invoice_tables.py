@@ -24,7 +24,6 @@ NEW_TENANT_TABLES = (
     "invoices",
     "invoice_lines",
     "invoice_exceptions",
-    "invoice_history",
 )
 
 def upgrade() -> None:

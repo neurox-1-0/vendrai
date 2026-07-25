@@ -49,12 +49,12 @@ ALLOWED_TRANSITIONS: dict[CaseStatus, set[CaseStatus]] = {
     CaseStatus.FAILED: set(),
     CaseStatus.CANCELLED: set(),
     # Invoice exception transitions
-    CaseStatus.INVOICE_MATCHING: {CaseStatus.EXCEPTION_CLASSIFIED, CaseStatus.APPROVAL_PENDING, CaseStatus.BLOCKED_DUPLICATE, CaseStatus.HOLD, CaseStatus.NEEDS_CLARIFICATION, CaseStatus.FAILED},
+    CaseStatus.INVOICE_MATCHING: {CaseStatus.EXCEPTION_CLASSIFIED, CaseStatus.APPROVAL_PENDING, CaseStatus.BLOCKED_DUPLICATE, CaseStatus.HOLD, CaseStatus.NEEDS_CLARIFICATION, CaseStatus.VERIFICATION_FAILED, CaseStatus.FAILED},
     CaseStatus.EXCEPTION_CLASSIFIED: {CaseStatus.TOLERANCE_CHECK, CaseStatus.NEEDS_CLARIFICATION, CaseStatus.FAILED},
     CaseStatus.TOLERANCE_CHECK: {CaseStatus.AUTO_RESOLVED, CaseStatus.EVIDENCE_BUILDING, CaseStatus.NEEDS_CLARIFICATION},
     CaseStatus.AUTO_RESOLVED: {CaseStatus.ERP_SYNC_PENDING},
-    CaseStatus.BLOCKED_DUPLICATE: set(),
-    CaseStatus.HOLD: {CaseStatus.APPROVAL_PENDING, CaseStatus.REJECTED, CaseStatus.CANCELLED},
+    CaseStatus.BLOCKED_DUPLICATE: {CaseStatus.APPROVED, CaseStatus.REJECTED, CaseStatus.NEEDS_CLARIFICATION, CaseStatus.CANCELLED},
+    CaseStatus.HOLD: {CaseStatus.APPROVAL_PENDING, CaseStatus.APPROVED, CaseStatus.REJECTED, CaseStatus.NEEDS_CLARIFICATION, CaseStatus.CANCELLED},
 }
 
 

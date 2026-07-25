@@ -61,6 +61,14 @@ async def decide_approval(
         raise HTTPException(409, detail={"code": "STALE_APPROVAL", "current_version": case.current_version})
     if body.evidence_hash != task.evidence_hash:
         raise HTTPException(409, detail={"code": "EVIDENCE_CHANGED"})
+    invoice_override_tasks = {
+        "INVOICE_EXCEPTION_RESOLUTION",
+        "TAX_REVIEW",
+        "PROCUREMENT_REVIEW",
+        "DUPLICATE_REVIEW",
+    }
+    if body.decision == "APPROVED" and task.task_type in invoice_override_tasks and not body.comment:
+        raise HTTPException(422, detail={"code": "OVERRIDE_COMMENT_REQUIRED"})
 
     decision = ApprovalDecision(
         tenant_id=principal.tenant_id, approval_task_id=task_id, decided_by=principal.user_id,
@@ -93,11 +101,28 @@ async def decide_approval(
         next_event = None
         next_status = None
     else:
-        case.status = CaseStatus.RISK_REVIEW
+        # Escalation closes this decision task but deliberately leaves the case
+        # in its current safety state. A fresh admin task keeps the workflow
+        # actionable without inventing an invalid state transition.
         event_type = "approval.escalated.v1"
         next_event = None
         next_status = None
     case.current_version += 1
+    if body.decision == "ESCALATED":
+        db.add(
+            ApprovalTask(
+                tenant_id=principal.tenant_id,
+                case_id=case.case_id,
+                run_id=task.run_id,
+                task_type=f"{task.task_type}_ESCALATED",
+                status="PENDING",
+                assigned_role="admin",
+                proposed_action=task.proposed_action,
+                evidence_packet=task.evidence_packet,
+                evidence_hash=task.evidence_hash,
+                case_version=case.current_version,
+            )
+        )
     await append_case_event(
         db, tenant_id=principal.tenant_id, case_id=case.case_id, event_type="APPROVAL_DECIDED",
         actor_type="USER", actor_id=str(principal.user_id), payload={"decision": body.decision, "status": case.status},

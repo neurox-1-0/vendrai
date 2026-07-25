@@ -1,819 +1,984 @@
 import asyncio
-import json
-import logging
-import os
+import re
 import uuid
-from datetime import UTC, datetime
-from pathlib import Path
+from datetime import date
+from decimal import Decimal, InvalidOperation
+from typing import Any
 
-from sqlalchemy import select
+import httpx
+from sqlalchemy import delete, func, select
 
-from sqlalchemy import func, select
-
+from app.config import settings
 from app.domain.cases import CaseStatus
-from app.domain.invoices import check_tolerance
+from app.domain.security import canonical_hash, normalize_vendor_name
 from app.models import (
-    AgentRun, ApprovalTask, Case, ClarificationTask, Document,
-    EvidenceItem, ExtractedField, InboxReceipt, InvoiceHistoryRecord, Vendor,
+    AgentRun,
+    ApprovalTask,
+    Case,
+    ClarificationTask,
+    Document,
+    DocumentPage,
+    EvidenceItem,
+    ExtractedField,
+    GoodsReceipt,
+    GoodsReceiptLine,
+    InboxReceipt,
+    InvoiceException,
+    InvoiceHistoryRecord,
+    InvoiceLine,
+    InvoiceRecord,
+    PurchaseOrder,
+    PurchaseOrderLine,
+    Vendor,
 )
-from app.services.events import append_case_event, enqueue_event
+from app.services.events import append_audit, append_case_event, enqueue_event
 from app.workers.common import consume
 from app.workers.database import WorkerSession, set_worker_tenant
-from app.config import settings
-from pydantic import BaseModel, Field
-
-logger = logging.getLogger(__name__)
-
-class InvoiceLineItem(BaseModel):
-    line_number: int
-    description: str
-    quantity: float
-    unit_price: float
-    amount: float
-    tax_rate: float
-    po_line_ref: str | None = None
-
-class ExtractedInvoice(BaseModel):
-    invoice_number: str
-    vendor_name: str
-    total_amount: float
-    tax_amount: float
-    currency: str
-    line_items: list[InvoiceLineItem]
-
-# Mock implementation of LangGraph dispatch for invoice analysis
-# In a full implementation, this would import build_invoice_graph from agent.app.invoice_graph
 
 
-async def handle_invoice_submitted(envelope: dict) -> None:
+INVOICE_NUMBER = re.compile(
+    r"(?:invoice\s+(?:number|no\.?|#)|tax\s+invoice\s+no|inv)[:\s]+([A-Z0-9][A-Z0-9./-]{2,})",
+    re.IGNORECASE,
+)
+PO_NUMBER = re.compile(
+    r"(?:po\s+(?:number|ref|#|no\.?)|purchase\s+order)[:\s]+([A-Z0-9][A-Z0-9./-]{2,})",
+    re.IGNORECASE,
+)
+CURRENCY = re.compile(r"\b(USD|EUR|GBP|LKR|AUD|CAD|JPY|INR|SGD)\b", re.IGNORECASE)
+TOTAL_AMOUNT = re.compile(
+    r"(?:grand\s+total|amount\s+due|total\s+due|invoice\s+total|total)[:\s]+(?:[A-Z]{3}\s*)?([\d,]+(?:\.\d{1,4})?)",
+    re.IGNORECASE,
+)
+TAX_AMOUNT = re.compile(
+    r"(?:tax|vat)\s*(?:amount)?[:\s]+(?:[A-Z]{3}\s*)?([\d,]+(?:\.\d{1,4})?)",
+    re.IGNORECASE,
+)
+TAX_RATE = re.compile(r"(?:vat|tax)\s*(?:rate)?[:\s]*(\d+(?:\.\d+)?)\s*%", re.IGNORECASE)
+LINE_PATTERN = re.compile(
+    r"(?m)^\s*(\d+)\s+(.+?)\s+(\d+(?:\.\d+)?)\s+(?:[A-Z]{3}\s*)?([\d,]+(?:\.\d{1,4})?)\s+(?:[A-Z]{3}\s*)?([\d,]+(?:\.\d{1,4})?)\s*$"
+)
+GRN_LINE_PATTERN = re.compile(
+    r"(?m)^\s*(\d+)\s+(.+?)\s+(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s*$"
+)
+
+
+def _decimal(value: str | int | float | Decimal | None) -> Decimal:
+    if value is None:
+        return Decimal("0")
+    try:
+        return Decimal(str(value).replace(",", "")).quantize(Decimal("0.0001"))
+    except (InvalidOperation, ValueError) as exc:
+        raise ValueError("INVALID_MONETARY_VALUE") from exc
+
+
+def _money(value: Decimal) -> float:
+    return float(value.quantize(Decimal("0.01")))
+
+
+def _first_match(pattern: re.Pattern[str], text: str) -> str | None:
+    match = pattern.search(text)
+    return match.group(1).strip() if match else None
+
+
+def extract_invoice_from_text(text: str) -> tuple[dict[str, Any] | None, list[str]]:
+    """Extract only supported deterministic fields from locally masked page text."""
+    invoice_number = _first_match(INVOICE_NUMBER, text)
+    total_text = _first_match(TOTAL_AMOUNT, text)
+    currency = (_first_match(CURRENCY, text) or "").upper()
+    po_number = _first_match(PO_NUMBER, text)
+    missing: list[str] = []
+    if not invoice_number:
+        missing.append("invoice_number")
+    if not total_text:
+        missing.append("total_amount")
+    if not currency:
+        missing.append("currency")
+
+    line_items: list[dict[str, Any]] = []
+    for match in LINE_PATTERN.finditer(text):
+        line_number, description, quantity, unit_price, amount = match.groups()
+        line_items.append(
+            {
+                "line_number": int(line_number),
+                "description": " ".join(description.split())[:500],
+                "quantity": float(_decimal(quantity)),
+                "unit_price": _money(_decimal(unit_price)),
+                "amount": _money(_decimal(amount)),
+                "tax_rate": float(_decimal(_first_match(TAX_RATE, text) or "0")),
+                "po_line_ref": line_number,
+            }
+        )
+    if not line_items:
+        missing.append("line_items")
+    if missing:
+        return None, missing
+
+    vendor_name = next(
+        (
+            " ".join(line.split())[:240]
+            for line in text.splitlines()[:10]
+            if len(line.strip()) >= 3
+            and not any(marker in line.upper() for marker in ("INVOICE", "PAGE ", "BILL TO", "SHIP TO"))
+        ),
+        None,
+    )
+    tax_text = _first_match(TAX_AMOUNT, text)
+    return (
+        {
+            "invoice_number": invoice_number,
+            "po_reference": po_number,
+            "vendor_name": vendor_name,
+            "total_amount": _money(_decimal(total_text)),
+            "tax_amount": _money(_decimal(tax_text)),
+            "tax_rate": float(_decimal(_first_match(TAX_RATE, text) or "0")),
+            "currency": currency,
+            "line_items": line_items,
+        },
+        [],
+    )
+
+
+def parse_po_text(text: str) -> dict[str, Any]:
+    lines: dict[int, dict[str, Any]] = {}
+    for match in LINE_PATTERN.finditer(text):
+        line_number, description, quantity, unit_price, amount = match.groups()
+        lines[int(line_number)] = {
+            "line_number": int(line_number),
+            "description": " ".join(description.split())[:500],
+            "quantity": float(_decimal(quantity)),
+            "unit_price": _money(_decimal(unit_price)),
+            "amount": _money(_decimal(amount)),
+        }
+    return {
+        "po_number": _first_match(PO_NUMBER, text),
+        "tax_rate": float(_decimal(_first_match(TAX_RATE, text) or "0")),
+        "lines": lines,
+    }
+
+
+def parse_grn_text(text: str) -> dict[str, Any]:
+    lines: dict[int, dict[str, Any]] = {}
+    for match in GRN_LINE_PATTERN.finditer(text):
+        line_number, description, ordered, received = match.groups()
+        lines[int(line_number)] = {
+            "line_number": int(line_number),
+            "description": " ".join(description.split())[:500],
+            "ordered": float(_decimal(ordered)),
+            "received": float(_decimal(received)),
+        }
+    return {"lines": lines}
+
+
+def check_missing_po(extracted_invoice: dict[str, Any], all_case_docs: list[Any], po_data: dict[str, Any]) -> bool:
+    """A printed PO reference is not proof; validated PO line data is mandatory."""
+    del extracted_invoice, all_case_docs
+    return not bool(po_data.get("lines"))
+
+
+def check_tax_mismatch(extracted_invoice: dict[str, Any], po_data: dict[str, Any]) -> dict[str, Any]:
+    invoice_rate = _decimal(extracted_invoice.get("tax_rate"))
+    expected_rate = _decimal(po_data.get("tax_rate"))
+    if expected_rate == 0:
+        return {"mismatch": False, "unverified": True}
+    if abs(invoice_rate - expected_rate) > Decimal("0.1"):
+        return {
+            "mismatch": True,
+            "unverified": False,
+            "invoice_tax_rate": float(invoice_rate),
+            "expected_tax_rate": float(expected_rate),
+            "message": (
+                f"Tax mismatch detected: invoice rate {invoice_rate}% does not match the verified PO rate "
+                f"{expected_rate}%."
+            ),
+        }
+    return {"mismatch": False, "unverified": False}
+
+
+async def _document_text(session, document_id: uuid.UUID) -> str:
+    pages = (
+        await session.execute(
+            select(DocumentPage)
+            .where(DocumentPage.document_id == document_id)
+            .order_by(DocumentPage.page_number)
+        )
+    ).scalars().all()
+    return "\n".join(page.text_content or "" for page in pages)
+
+
+def detect_document_type(text: str) -> str | None:
+    """Classify a supported AP document from locally extracted text."""
+    upper = text.upper()
+    if "GOODS RECEIPT" in upper or re.search(r"\bGRN(?:\s+NO|\s*#|[-:])", upper):
+        return "GOODS_RECEIPT"
+    if "PURCHASE ORDER" in upper:
+        return "PURCHASE_ORDER"
+    if "TAX INVOICE" in upper or re.search(r"\bINVOICE(?:\s+NO|\s*#|[-:])", upper):
+        return "INVOICE"
+    return None
+
+
+async def _classify_documents(session, documents: list[Document]) -> dict[str, list[tuple[Document, str]]]:
+    classified: dict[str, list[tuple[Document, str]]] = {
+        "INVOICE": [],
+        "PURCHASE_ORDER": [],
+        "GOODS_RECEIPT": [],
+    }
+    for document in documents:
+        text = await _document_text(session, document.document_id)
+        declared = document.document_type.upper()
+        detected = detect_document_type(text)
+        if declared in classified:
+            if detected != declared:
+                continue
+            kind = declared
+        elif detected:
+            kind = detected
+        else:
+            continue
+        classified[kind].append((document, text))
+    return classified
+
+
+async def _reference_data(
+    session,
+    tenant_id: uuid.UUID,
+    case: Case,
+    invoice_record: InvoiceRecord,
+    classified: dict[str, list[tuple[Document, str]]],
+) -> tuple[dict[str, Any], dict[str, Any], str]:
+    po_data: dict[str, Any] = {"po_number": invoice_record.po_number, "tax_rate": 0.0, "lines": {}}
+    grn_data: dict[str, Any] = {"lines": {}}
+    source = "NONE"
+    if invoice_record.po_number:
+        po = await session.scalar(
+            select(PurchaseOrder).where(
+                PurchaseOrder.tenant_id == tenant_id,
+                PurchaseOrder.po_number == invoice_record.po_number,
+            )
+        )
+        if po and (case.vendor_id is None or po.vendor_id == case.vendor_id):
+            po_lines = (
+                await session.execute(
+                    select(PurchaseOrderLine).where(
+                        PurchaseOrderLine.purchase_order_id == po.purchase_order_id
+                    )
+                )
+            ).scalars().all()
+            po_data = {
+                "po_number": po.po_number,
+                "tax_rate": float(po_lines[0].tax_rate) if po_lines else 0.0,
+                "total_amount": float(po.total_amount),
+                "lines": {
+                    line.line_number: {
+                        "line_number": line.line_number,
+                        "description": line.item_description,
+                        "quantity": float(line.quantity),
+                        "unit_price": float(line.unit_price),
+                        "amount": float(line.amount),
+                    }
+                    for line in po_lines
+                },
+            }
+            receipts = (
+                await session.execute(
+                    select(GoodsReceipt).where(
+                        GoodsReceipt.tenant_id == tenant_id,
+                        GoodsReceipt.purchase_order_id == po.purchase_order_id,
+                        GoodsReceipt.status == "RECEIVED",
+                    )
+                )
+            ).scalars().all()
+            for receipt in receipts:
+                receipt_lines = (
+                    await session.execute(
+                        select(GoodsReceiptLine).where(
+                            GoodsReceiptLine.goods_receipt_id == receipt.goods_receipt_id,
+                            GoodsReceiptLine.quality_status == "ACCEPTED",
+                        )
+                    )
+                ).scalars().all()
+                for line in receipt_lines:
+                    grn_data["lines"][line.line_number] = {
+                        "line_number": line.line_number,
+                        "received": float(line.quantity_received),
+                    }
+            source = "ERP_DATABASE"
+    if not po_data["lines"] and classified["PURCHASE_ORDER"]:
+        po_data = parse_po_text(classified["PURCHASE_ORDER"][0][1])
+        source = "UPLOADED_DOCUMENT"
+    if not grn_data["lines"] and classified["GOODS_RECEIPT"]:
+        grn_data = parse_grn_text(classified["GOODS_RECEIPT"][0][1])
+        source = f"{source}+UPLOADED_DOCUMENT"
+    return po_data, grn_data, source
+
+
+def _three_way_match(
+    invoice: dict[str, Any],
+    po_data: dict[str, Any],
+    grn_data: dict[str, Any],
+) -> dict[str, Any]:
+    line_matches: list[dict[str, Any]] = []
+    total_variance = Decimal("0")
+    for item in invoice["line_items"]:
+        line_number = int(item["line_number"])
+        po_line = po_data.get("lines", {}).get(line_number)
+        grn_line = grn_data.get("lines", {}).get(line_number)
+        if not po_line:
+            line_matches.append(
+                {
+                    "invoice_line": item,
+                    "po_line": None,
+                    "grn_line": grn_line,
+                    "price_variance": 0.0,
+                    "quantity_variance": 0.0,
+                    "match_status": "MISSING_REFERENCE",
+                }
+            )
+            continue
+        invoice_price = _decimal(item["unit_price"])
+        po_price = _decimal(po_line["unit_price"])
+        invoice_quantity = _decimal(item["quantity"])
+        received_quantity = _decimal(grn_line["received"]) if grn_line else Decimal("0")
+        price_variance = invoice_price - po_price
+        quantity_variance = invoice_quantity - received_quantity
+        line_variance = abs(price_variance) * invoice_quantity + abs(quantity_variance) * po_price
+        total_variance += line_variance
+        line_matches.append(
+            {
+                "invoice_line": item,
+                "po_line": po_line,
+                "grn_line": grn_line,
+                "price_variance": _money(price_variance),
+                "quantity_variance": float(quantity_variance),
+                "match_status": (
+                    "FULL_MATCH"
+                    if price_variance == 0 and quantity_variance == 0 and grn_line
+                    else "PARTIAL_MATCH"
+                ),
+            }
+        )
+    po_total = sum((_decimal(line["amount"]) for line in po_data.get("lines", {}).values()), Decimal("0"))
+    variance_pct = (total_variance / po_total * Decimal("100")) if po_total else Decimal("0")
+    full = bool(line_matches) and all(item["match_status"] == "FULL_MATCH" for item in line_matches)
+    return {
+        "match_status": "FULL_MATCH" if full else "PARTIAL_MATCH",
+        "line_matches": line_matches,
+        "overall_variance_amount": _money(total_variance),
+        "overall_variance_pct": float(variance_pct.quantize(Decimal("0.01"))),
+    }
+
+
+async def _policy_clauses(tenant_id: uuid.UUID, reason_codes: list[str]) -> list[dict[str, Any]]:
+    query = (
+        "Invoice exception approval, three-way matching, goods receipt, duplicate, bank change, "
+        f"tax and tolerance controls. Reason codes: {', '.join(reason_codes)}"
+    )
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.post(
+                f"{settings.RETRIEVAL_URL}/v1/search",
+                json={
+                    "query": query,
+                    "tenant_id": str(tenant_id),
+                    "roles": ["analyst", "finance_approver", "procurement_approver", "admin"],
+                    "effective_date": date.today().isoformat(),
+                    "limit": 8,
+                },
+            )
+            response.raise_for_status()
+            body = response.json()
+    except (httpx.HTTPError, ValueError):
+        return []
+    if body.get("status") != "SUCCESS":
+        return []
+    return [
+        {
+            "policy_version_id": item.get("policy_version_id"),
+            "clause_id": item.get("clause_id"),
+            "heading_path": item.get("heading_path", []),
+            "content": item.get("content", ""),
+            "rerank_score": item.get("rerank_score"),
+        }
+        for item in body.get("items", [])
+        if item.get("policy_version_id") and item.get("clause_id") and item.get("content")
+    ]
+
+
+async def _request_clarification(
+    session,
+    *,
+    tenant_id: uuid.UUID,
+    case: Case,
+    run: AgentRun,
+    questions: list[dict[str, Any]],
+    reason_code: str,
+) -> None:
+    case.status = CaseStatus.NEEDS_CLARIFICATION
+    case.current_version += 1
+    run.status = "INTERRUPTED"
+    run.current_node = "clarification_interrupt"
+    run.state_json = {**run.state_json, "reason_code": reason_code}
+    session.add(
+        ClarificationTask(
+            tenant_id=tenant_id,
+            case_id=case.case_id,
+            run_id=run.run_id,
+            status="OPEN",
+            questions=questions,
+        )
+    )
+    await append_case_event(
+        session,
+        tenant_id=tenant_id,
+        case_id=case.case_id,
+        event_type="CLARIFICATION_REQUESTED",
+        actor_type="SYSTEM",
+        actor_id="invoice-worker",
+        payload={"reason_code": reason_code},
+    )
+
+
+async def handle_invoice_submitted(envelope: dict[str, Any]) -> None:
     event_id = uuid.UUID(envelope["event_id"])
     tenant_id = uuid.UUID(envelope["tenant_id"])
     case_id = uuid.UUID(envelope["payload"]["case_id"])
     run_id = uuid.UUID(envelope["payload"]["run_id"])
-    
     async with WorkerSession() as session:
         async with session.begin():
             await set_worker_tenant(session, str(tenant_id))
             if await session.get(InboxReceipt, {"consumer_name": "invoice-worker", "event_id": event_id}):
                 return
-                
-            documents = (await session.execute(select(Document).where(Document.case_id == case_id))).scalars().all()
-            if not documents or all(document.processing_status == "READY" for document in documents):
-                case = await session.get(Case, case_id, with_for_update=True)
+            case = await session.get(Case, case_id, with_for_update=True)
+            run = await session.get(AgentRun, run_id, with_for_update=True)
+            if not case or case.tenant_id != tenant_id or not run:
+                raise RuntimeError("INVOICE_CONTEXT_NOT_FOUND")
+            documents = (
+                await session.execute(
+                    select(Document).where(
+                        Document.case_id == case_id,
+                        Document.tenant_id == tenant_id,
+                    )
+                )
+            ).scalars().all()
+            if not documents:
+                await _request_clarification(
+                    session,
+                    tenant_id=tenant_id,
+                    case=case,
+                    run=run,
+                    reason_code="DOCUMENT_REQUIRED",
+                    questions=[
+                        {
+                            "question_id": "invoice-document",
+                            "text": "Upload an invoice document and resubmit the case.",
+                            "field_name": "document",
+                            "requested_from_role": "requester",
+                        }
+                    ],
+                )
+            elif all(document.processing_status == "READY" for document in documents):
                 case.status = CaseStatus.INVOICE_MATCHING
                 case.current_version += 1
-                
                 enqueue_event(
-                    session, tenant_id=tenant_id, aggregate_type="case", aggregate_id=case_id,
-                    aggregate_version=case.current_version, event_type="invoice.analysis.requested.v1",
+                    session,
+                    tenant_id=tenant_id,
+                    aggregate_type="case",
+                    aggregate_id=case_id,
+                    aggregate_version=case.current_version,
+                    event_type="invoice.analysis.requested.v1",
                     idempotency_key=f"invoice.analysis:{case_id}:v{case.current_version}",
                     payload={"case_id": str(case_id), "run_id": str(run_id)},
                 )
             else:
-                await append_case_event(session, tenant_id=tenant_id, case_id=case_id, event_type="RUN_WAITING_FOR_DOCUMENTS", actor_type="SYSTEM", actor_id="invoice-worker", payload={"run_id": str(run_id)})
-            
+                await append_case_event(
+                    session,
+                    tenant_id=tenant_id,
+                    case_id=case_id,
+                    event_type="RUN_WAITING_FOR_DOCUMENTS",
+                    actor_type="SYSTEM",
+                    actor_id="invoice-worker",
+                    payload={"run_id": str(run_id)},
+                )
             session.add(InboxReceipt(consumer_name="invoice-worker", event_id=event_id, tenant_id=tenant_id))
 
 
-def extract_invoice_from_pdf_file(pdf_path: Path) -> dict | None:
-    try:
-        import pypdf
-        import re
-        reader = pypdf.PdfReader(str(pdf_path))
-        text = "\n".join([page.extract_text() or "" for page in reader.pages])
-        if not text.strip():
-            return None
-            
-        lines = [line.strip() for line in text.splitlines() if line.strip()]
-        
-        inv_match = re.search(r"(?:Invoice\s+number|Invoice\s+No\.?|Invoice\s+#|TAX\s+INVOICE\s+NO|INV)[:\s\n]+([A-Z0-9-]+)", text, re.IGNORECASE)
-        invoice_number = inv_match.group(1).strip() if inv_match else "UNKNOWN-INV"
-        
-        po_match = re.search(r"(?:PO\s+Number|PO\s+Ref|PO\s+#|PO\s+No\.?|Purchase\s+Order)[:\s\n]+([A-Z0-9-]+)", text, re.IGNORECASE)
-        po_reference = po_match.group(1).strip() if po_match else None
-
-        vendor_name = "Vendor"
-        for line in lines[:8]:
-            if line not in ("NO", "AH", "Invoice", "Page 1", "TAX INVOICE") and not line.startswith("http") and len(line) > 3:
-                vendor_name = line
-                break
-                
-        curr_match = re.search(r"(?:Currency|Total)[:\s\n]+([A-Z]{3})", text, re.IGNORECASE)
-        currency = curr_match.group(1).strip() if curr_match else "LKR"
-        
-        total_amt = 0.0
-        amt_match = re.search(r"(?:Amount due|Total|Subtotal|TOTAL\s+DUE)[:\s\n]+(?:[A-Z]{3}\s+)?([\d,]+\.?\d*)", text, re.IGNORECASE)
-        if amt_match:
-            total_amt = float(amt_match.group(1).replace(",", ""))
-            
-        tax_amt = 0.0
-        tax_match = re.search(r"(?:Tax|VAT)[:\s\(\d%\)\n]+(?:[A-Z]{3}\s+)?([\d,]+\.?\d*)", text, re.IGNORECASE)
-        if tax_match:
-            tax_amt = float(tax_match.group(1).replace(",", ""))
-
-        tax_rate = 18.0
-        rate_match = re.search(r"(?:VAT|Tax|SSCL)\s*(?:\(?(\d+(?:\.\d+)?)\s*%\)?)", text, re.IGNORECASE) or re.search(r"(\d+(?:\.\d+)?)\s*%\s*(?:VAT|Tax)", text, re.IGNORECASE)
-        if rate_match:
-            tax_rate = float(rate_match.group(1))
-        elif "15%" in text or "15 percent" in text:
-            tax_rate = 15.0
-
-        bank_match = re.search(r"(?:Account\s+number|IBAN|Account|Bank\s+Account)[:\s\n]+([0-9-]+)", text, re.IGNORECASE)
-        bank_account = bank_match.group(1).strip() if bank_match else None
-
-        line_items = []
-        # Multi-line pattern
-        line_pattern = re.findall(r"(\d+)\s*\n\s*([^\n]+)\s*\n\s*(\d+(?:\.\d+)?)\s*\n\s*(?:[A-Z]{3}\s+)?([\d,]+\.?\d*)\s*\n\s*(?:[A-Z]{3}\s+)?([\d,]+\.?\d*)", text)
-        for item in line_pattern:
-            line_num, desc, qty, u_price, total = item
-            line_items.append({
-                "line_number": int(line_num),
-                "description": desc.strip(),
-                "quantity": float(qty),
-                "unit_price": float(u_price.replace(",", "")),
-                "amount": float(total.replace(",", "")),
-                "tax_rate": tax_rate,
-                "po_line_ref": str(line_num)
-            })
-
-        if not line_items:
-            # Single-line pattern
-            single_pattern = re.findall(r"(\d+)\s+([A-Za-z0-9,\.\s\(\)\/-]+?)\s+(\d+(?:\.\d+)?)\s+(?:LKR\s+)?([\d,]+\.?\d*)\s+(?:LKR\s+)?([\d,]+\.?\d*)", text)
-            for item in single_pattern:
-                line_num, desc, qty, u_price, total = item
-                line_items.append({
-                    "line_number": int(line_num),
-                    "description": desc.strip(),
-                    "quantity": float(qty),
-                    "unit_price": float(u_price.replace(",", "")),
-                    "amount": float(total.replace(",", "")),
-                    "tax_rate": tax_rate,
-                    "po_line_ref": str(line_num)
-                })
-
-        if not line_items:
-            line_items.append({
-                "line_number": 1,
-                "description": f"Invoice Line Item ({invoice_number})",
-                "quantity": 1.0,
-                "unit_price": total_amt or 100.0,
-                "amount": total_amt or 100.0,
-                "tax_rate": tax_rate,
-                "po_line_ref": "1"
-            })
-
-        return {
-            "invoice_number": invoice_number,
-            "po_reference": po_reference,
-            "vendor_name": vendor_name,
-            "total_amount": total_amt or sum(item["amount"] for item in line_items),
-            "tax_amount": tax_amt,
-            "tax_rate": tax_rate,
-            "currency": currency,
-            "line_items": line_items,
-            "bank_account": bank_account
-        }
-    except Exception as exc:
-        logger.warning("Local pypdf extraction exception: %s", exc)
-        return None
-
-
-def extract_po_and_grn_from_documents(documents: list) -> tuple[dict, dict]:
-    po_data = {"lines": {}, "po_number": None, "tax_rate": 18.0}
-    grn_data = {"lines": {}, "grn_number": None}
-    
-    for doc in documents:
-        if not getattr(doc, "storage_key", None):
-            continue
-        file_path = settings.LOCAL_STORAGE_ROOT / doc.storage_key
-        if not file_path.exists():
-            continue
-            
-        try:
-            import pypdf
-            import re
-            reader = pypdf.PdfReader(str(file_path))
-            text = "\n".join([page.extract_text() or "" for page in reader.pages])
-            text_upper = text.upper()
-            
-            is_grn = "GOODS RECEIPT" in text_upper or "GRN-" in text_upper
-            is_invoice = "TAX INVOICE" in text_upper or "AMOUNT DUE" in text_upper or "BILL TO" in text_upper or "REMITTANCE DETAILS" in text_upper
-            is_po = ("PURCHASE ORDER" in text_upper or "ORDER DATE" in text_upper) and not is_grn and not is_invoice
-
-            if is_grn:
-                grn_num_match = re.search(r"(?:Receipt\s+number|GRN)[:\s\n]+([A-Z0-9-]+)", text, re.IGNORECASE)
-                if grn_num_match:
-                    grn_data["grn_number"] = grn_num_match.group(1).strip()
-
-                lines = re.findall(r"(\d+)\s*\n\s*([^\n]+)\s*\n\s*(\d+(?:\.\d+)?)\s*\n\s*(\d+(?:\.\d+)?)", text)
-                if not lines:
-                    lines = re.findall(r"(\d+)\s+([A-Za-z0-9,\.\s\(\)\/-]+?)\s+(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)", text)
-
-                for item in lines:
-                    l_num, desc, ordered, received = item
-                    grn_data["lines"][int(l_num)] = {
-                        "description": desc.strip(),
-                        "ordered": float(ordered),
-                        "received": float(received)
-                    }
-            elif is_po:
-                po_num_match = re.search(r"(?:PO\s+Number|PO\s+#|Purchase\s+Order)[:\s\n]+([A-Z0-9-]+)", text, re.IGNORECASE)
-                if po_num_match:
-                    po_data["po_number"] = po_num_match.group(1).strip()
-
-                tax_rate_match = re.search(r"(\d+(?:\.\d+)?)\s*%\s*(?:VAT|Tax)", text, re.IGNORECASE)
-                if tax_rate_match:
-                    po_data["tax_rate"] = float(tax_rate_match.group(1))
-
-                lines = re.findall(r"(\d+)\s*\n\s*([^\n]+)\s*\n\s*(\d+(?:\.\d+)?)\s*\n\s*(?:[A-Z]{3}\s+)?([\d,]+\.?\d*)\s*\n\s*(?:[A-Z]{3}\s+)?([\d,]+\.?\d*)", text)
-                if not lines:
-                    lines = re.findall(r"(\d+)\s+([A-Za-z0-9,\.\s\(\)\/-]+?)\s+(\d+(?:\.\d+)?)\s+(?:LKR\s+)?([\d,]+\.?\d*)\s+(?:LKR\s+)?([\d,]+\.?\d*)", text)
-
-                for item in lines:
-                    l_num, desc, qty, u_price, total = item
-                    po_data["lines"][int(l_num)] = {
-                        "description": desc.strip(),
-                        "quantity": float(qty),
-                        "unit_price": float(u_price.replace(",", "")),
-                        "amount": float(total.replace(",", ""))
-                    }
-        except Exception as exc:
-            logger.warning("Error reading doc for PO/GRN: %s", exc)
-            
-    return po_data, grn_data
-
-
-async def check_duplicate_invoice(session, tenant_id: uuid.UUID, vendor_name: str, invoice_number: str) -> dict:
-    count = (await session.execute(select(func.count(InvoiceHistoryRecord.record_id)).where(InvoiceHistoryRecord.tenant_id == tenant_id))).scalar()
-    if not count:
-        seed1 = InvoiceHistoryRecord(
-            tenant_id=tenant_id, vendor_id="V000184", invoice_number="NSO-INV-2606203",
-            gross_amount=1340480.00, currency="LKR", po_number="PO-2026-00410", status="PAID"
-        )
-        seed2 = InvoiceHistoryRecord(
-            tenant_id=tenant_id, vendor_id="V000184", invoice_number="NSO-INV-2605102",
-            gross_amount=892080.00, currency="LKR", po_number="PO-2026-00301", status="PAID"
-        )
-        session.add_all([seed1, seed2])
-        await session.flush()
-
-    existing = (await session.execute(
-        select(InvoiceHistoryRecord).where(
-            InvoiceHistoryRecord.tenant_id == tenant_id,
-            func.lower(InvoiceHistoryRecord.invoice_number) == invoice_number.lower()
-        )
-    )).scalars().first()
-
-    if existing:
-        return {
-            "is_duplicate": True,
-            "invoice_number": existing.invoice_number,
-            "status": existing.status,
-            "message": f"Duplicate invoice detected: Invoice {invoice_number} has already been recorded as {existing.status}."
-        }
-    return {"is_duplicate": False}
-
-
-def check_missing_po(extracted_invoice: dict, all_case_docs: list, po_data: dict) -> bool:
-    if po_data.get("lines"):
-        return False
-    for doc in all_case_docs:
-        fn = (doc.original_filename or "").lower()
-        if "purchase_order" in fn or "po" in fn:
-            return False
-    if extracted_invoice.get("po_reference"):
-        return False
-    return True
-
-
-def check_tax_mismatch(extracted_invoice: dict, po_data: dict) -> dict:
-    inv_tax_rate = extracted_invoice.get("tax_rate", 18.0)
-    po_tax_rate = po_data.get("tax_rate", 18.0)
-    if abs(inv_tax_rate - po_tax_rate) > 0.1:
-        return {
-            "mismatch": True,
-            "invoice_tax_rate": inv_tax_rate,
-            "expected_tax_rate": po_tax_rate,
-            "message": f"Tax mismatch detected: Invoice tax rate is {inv_tax_rate:.0f}% while configured reference rate is {po_tax_rate:.0f}%."
-        }
-    return {"mismatch": False}
-
-
-async def run_invoice_analysis(envelope: dict) -> None:
+async def run_invoice_analysis(envelope: dict[str, Any]) -> None:
     event_id = uuid.UUID(envelope["event_id"])
     tenant_id = uuid.UUID(envelope["tenant_id"])
     case_id = uuid.UUID(envelope["payload"]["case_id"])
     run_id = uuid.UUID(envelope["payload"]["run_id"])
-    
     async with WorkerSession() as session:
         async with session.begin():
             await set_worker_tenant(session, str(tenant_id))
             if await session.get(InboxReceipt, {"consumer_name": "invoice-worker", "event_id": event_id}):
                 return
-                
             case = await session.get(Case, case_id, with_for_update=True)
             run = await session.get(AgentRun, run_id, with_for_update=True)
             if not case or case.tenant_id != tenant_id or not run:
-                logger.warning("Skipping orphaned event %s: case=%s run=%s", event_id, case_id, run_id)
+                raise RuntimeError("INVOICE_CONTEXT_NOT_FOUND")
+            documents = (
+                await session.execute(
+                    select(Document).where(
+                        Document.case_id == case_id,
+                        Document.tenant_id == tenant_id,
+                        Document.processing_status == "READY",
+                    )
+                )
+            ).scalars().all()
+            classified = await _classify_documents(session, documents)
+            if len(classified["INVOICE"]) != 1:
+                await _request_clarification(
+                    session,
+                    tenant_id=tenant_id,
+                    case=case,
+                    run=run,
+                    reason_code="INVOICE_DOCUMENT_AMBIGUOUS",
+                    questions=[
+                        {
+                            "question_id": "invoice-document",
+                            "text": "Provide exactly one document classified as INVOICE.",
+                            "field_name": "document_type",
+                            "requested_from_role": "requester",
+                        }
+                    ],
+                )
                 session.add(InboxReceipt(consumer_name="invoice-worker", event_id=event_id, tenant_id=tenant_id))
                 return
-                
-            run.status = "RUNNING"
-            run.current_node = "invoice_specialist_analysis"
-            run.started_at = run.started_at or datetime.now(UTC)
-            await append_case_event(session, tenant_id=tenant_id, case_id=case_id, event_type="INVOICE_ANALYSIS_STARTED", actor_type="SYSTEM", actor_id="invoice-worker", payload={"run_id": str(run_id)})
-            await session.flush()
 
-            # ---------------------------------------------------------
-            # AI & Document Extraction Execution
-            # ---------------------------------------------------------
-            all_docs = (await session.execute(select(Document).where(Document.case_id == case_id))).scalars().all()
-            invoice_document = None
-
-            for doc in all_docs:
-                fn_lower = (doc.original_filename or "").lower()
-                if "invoice" in fn_lower or "inv" in fn_lower or "tax" in fn_lower:
-                    invoice_document = doc
-                    break
-
-            if not invoice_document and all_docs:
-                for doc in all_docs:
-                    if not doc.storage_key:
-                        continue
-                    file_path = settings.LOCAL_STORAGE_ROOT / doc.storage_key
-                    if file_path.exists():
-                        try:
-                            import pypdf
-                            text = "\n".join([page.extract_text() or "" for page in pypdf.PdfReader(str(file_path)).pages])
-                            if "INVOICE" in text.upper() or "TAX INVOICE" in text.upper():
-                                invoice_document = doc
-                                break
-                        except Exception:
-                            pass
-
-            if not invoice_document and all_docs:
-                invoice_document = all_docs[-1]
-
-            extracted_invoice = None
-            if invoice_document and invoice_document.storage_key:
-                file_path = settings.LOCAL_STORAGE_ROOT / invoice_document.storage_key
-                if file_path.exists():
-                    if settings.ALLOW_EXTERNAL_LLM and os.getenv("GEMINI_API_KEY"):
-                        try:
-                            from google import genai
-                            from google.genai import types
-                            client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
-                            uploaded_file = client.files.upload(path=str(file_path))
-                            
-                            prompt = """Extract the invoice details from this document. Ensure you capture line items correctly.
-Output MUST be a valid JSON object matching this schema:
-{
-  "invoice_number": "string",
-  "vendor_name": "string",
-  "total_amount": 0.0,
-  "tax_amount": 0.0,
-  "currency": "string",
-  "line_items": [
-    {
-      "line_number": 1,
-      "description": "string",
-      "quantity": 0.0,
-      "unit_price": 0.0,
-      "amount": 0.0,
-      "tax_rate": 0.0,
-      "po_line_ref": "string"
-    }
-  ]
-}"""
-                            response = client.models.generate_content(
-                                model=settings.DEFAULT_MODEL,
-                                contents=[uploaded_file, prompt],
-                                config=types.GenerateContentConfig(
-                                    response_mime_type="application/json",
-                                    temperature=0.0
-                                ),
-                            )
-                            extracted_invoice = json.loads(response.text)
-
-                            try:
-                                client.files.delete(name=uploaded_file.name)
-                            except Exception:
-                                pass
-                        except Exception as exc:
-                            logger.warning("External LLM extraction failed, using fallback pypdf parsing: %s", exc)
-                            extracted_invoice = None
-
-                    if not extracted_invoice:
-                        extracted_invoice = extract_invoice_from_pdf_file(file_path)
-
+            invoice_document, invoice_text = classified["INVOICE"][0]
+            extracted_invoice, missing_fields = extract_invoice_from_text(invoice_text)
             if not extracted_invoice:
-                logger.warning("No invoice document could be extracted for case %s", case_id)
-                extracted_invoice = {
-                    "invoice_number": f"INV-{str(case_id)[:8]}",
-                    "vendor_name": "Unknown Vendor",
-                    "total_amount": 0.0,
-                    "tax_amount": 0.0,
-                    "currency": "LKR",
-                    "line_items": []
-                }
+                await _request_clarification(
+                    session,
+                    tenant_id=tenant_id,
+                    case=case,
+                    run=run,
+                    reason_code="INVOICE_EXTRACTION_INCOMPLETE",
+                    questions=[
+                        {
+                            "question_id": field,
+                            "text": f"Confirm or correct invoice field: {field}.",
+                            "field_name": field,
+                            "requested_from_role": "requester",
+                        }
+                        for field in missing_fields
+                    ],
+                )
+                session.add(InboxReceipt(consumer_name="invoice-worker", event_id=event_id, tenant_id=tenant_id))
+                return
 
-            # ---------------------------------------------------------
-            # Document 3-Way Match & Exception Detection
-            # ---------------------------------------------------------
-            all_case_docs = (await session.execute(select(Document).where(Document.case_id == case_id))).scalars().all()
-            po_data, grn_data = extract_po_and_grn_from_documents(all_case_docs)
-            
-            line_matches = []
-            overall_variance = 0.0
-            exceptions = []
-            
-            for idx, item in enumerate(extracted_invoice["line_items"]):
-                l_num = item.get("line_number", idx + 1)
-                po_item = po_data["lines"].get(l_num)
-                grn_item = grn_data["lines"].get(l_num)
-                
-                po_price = po_item["unit_price"] if po_item else None
-                po_qty = po_item["quantity"] if po_item else None
-                grn_qty = grn_item["received"] if grn_item else po_qty
-                
-                inv_price = item.get("unit_price", 0.0)
-                inv_qty = item.get("quantity", 0.0)
-                
-                price_variance = (inv_price - po_price) if (po_price is not None) else 0.0
-                qty_variance = (inv_qty - grn_qty) if (grn_qty is not None) else 0.0
-                
-                if price_variance < 0:
-                    price_variance = 0.0
-                    
-                match_status = "MATCHED"
-                if price_variance > 0 or qty_variance > 0:
-                    match_status = "PARTIAL_MATCH"
-                    
-                line_matches.append({
-                    "invoice_line": item,
-                    "po_line": {"quantity": po_qty, "unit_price": po_price} if (po_price is not None) else None,
-                    "grn_line": {"quantity_received": grn_qty} if (grn_qty is not None) else None,
-                    "price_variance": price_variance,
-                    "quantity_variance": qty_variance,
-                    "match_status": match_status
-                })
-                
-                line_tot_variance = price_variance * inv_qty
-                overall_variance += line_tot_variance
-                
-                if price_variance > 0:
-                    exceptions.append({
-                        "exception_type": "PRICE_VARIANCE",
-                        "severity": "LOW" if price_variance <= 50.0 else "MEDIUM",
-                        "confidence": 0.95,
-                        "mismatch_details": {
-                            "message": f"Price variance found on {item['description']}: Invoice LKR {inv_price:,.2f} vs PO LKR {po_price:,.2f} (Variance: LKR {price_variance:,.2f})"
-                        },
-                        "affected_lines": [l_num]
-                    })
-                if qty_variance > 0:
-                    exceptions.append({
-                        "exception_type": "QUANTITY_VARIANCE",
-                        "severity": "MEDIUM",
-                        "confidence": 0.95,
-                        "mismatch_details": {
-                            "message": f"Quantity variance found on {item['description']}: Invoice Qty {inv_qty} vs GRN Received Qty {grn_qty}"
-                        },
-                        "affected_lines": [l_num]
-                    })
-            
-            variance_pct = (overall_variance / max(extracted_invoice["total_amount"], 1.0)) * 100
-            match_result = {
-                "match_status": "PARTIAL_MATCH" if overall_variance > 0 else "MATCHED",
-                "line_matches": line_matches,
-                "overall_variance_amount": overall_variance,
-                "overall_variance_pct": variance_pct,
-                "unmatched_invoice_lines": [],
-                "unmatched_po_lines": []
-            }
+            invoice_record = await session.scalar(
+                select(InvoiceRecord).where(
+                    InvoiceRecord.case_id == case_id,
+                    InvoiceRecord.tenant_id == tenant_id,
+                )
+            )
+            if not invoice_record:
+                invoice_record = InvoiceRecord(
+                    tenant_id=tenant_id,
+                    case_id=case_id,
+                    vendor_id=case.vendor_id,
+                    invoice_number=extracted_invoice["invoice_number"],
+                    po_number=extracted_invoice.get("po_reference"),
+                    total_amount=extracted_invoice["total_amount"],
+                    tax_amount=extracted_invoice["tax_amount"],
+                    currency=extracted_invoice["currency"],
+                )
+                session.add(invoice_record)
+                await session.flush()
+            invoice_record.invoice_number = extracted_invoice["invoice_number"]
+            invoice_record.po_number = extracted_invoice.get("po_reference") or invoice_record.po_number
+            invoice_record.total_amount = extracted_invoice["total_amount"]
+            invoice_record.tax_amount = extracted_invoice["tax_amount"]
+            invoice_record.currency = extracted_invoice["currency"]
+            invoice_record.status = "ANALYZING"
+            await session.execute(delete(InvoiceLine).where(InvoiceLine.invoice_id == invoice_record.invoice_id))
+            await session.execute(delete(InvoiceException).where(InvoiceException.case_id == case_id))
+            for item in extracted_invoice["line_items"]:
+                session.add(
+                    InvoiceLine(
+                        tenant_id=tenant_id,
+                        invoice_id=invoice_record.invoice_id,
+                        line_number=item["line_number"],
+                        description=item["description"],
+                        quantity=item["quantity"],
+                        unit_price=item["unit_price"],
+                        amount=item["amount"],
+                        tax_rate=item["tax_rate"],
+                        po_line_ref=item["po_line_ref"],
+                    )
+                )
 
-            # 1. Duplicate Invoice Check
-            dup_result = await check_duplicate_invoice(session, tenant_id, vendor_name=extracted_invoice.get("vendor_name", ""), invoice_number=extracted_invoice.get("invoice_number", ""))
-            duplicate_found = dup_result["is_duplicate"]
-            if duplicate_found:
-                exceptions.append({
-                    "exception_type": "DUPLICATE_INVOICE",
-                    "severity": "CRITICAL",
-                    "confidence": 0.99,
-                    "mismatch_details": {"message": dup_result["message"]},
-                    "affected_lines": []
-                })
-
-            # 2. Missing PO Check
-            missing_po = check_missing_po(extracted_invoice, all_case_docs, po_data)
+            po_data, grn_data, reference_source = await _reference_data(
+                session, tenant_id, case, invoice_record, classified
+            )
+            match_result = _three_way_match(extracted_invoice, po_data, grn_data)
+            reason_codes: list[str] = []
+            exceptions: list[dict[str, Any]] = []
+            missing_po = check_missing_po(extracted_invoice, documents, po_data)
+            missing_grn = not bool(grn_data.get("lines"))
             if missing_po:
-                exceptions.append({
-                    "exception_type": "MISSING_PO",
-                    "severity": "MEDIUM",
-                    "confidence": 0.95,
-                    "mismatch_details": {"message": "Purchase order reference not stated on invoice and no PO document attached."},
-                    "affected_lines": []
-                })
+                reason_codes.append("MISSING_VERIFIED_PO")
+            if missing_grn:
+                reason_codes.append("MISSING_ACCEPTED_GRN")
+            for line in match_result["line_matches"]:
+                line_number = line["invoice_line"]["line_number"]
+                if line["po_line"] is None:
+                    exceptions.append(
+                        {
+                            "exception_type": "MISSING_PO_LINE",
+                            "severity": "HIGH",
+                            "confidence": 1.0,
+                            "mismatch_details": {"line_number": line_number},
+                            "affected_lines": [line_number],
+                        }
+                    )
+                if line["price_variance"] != 0:
+                    exceptions.append(
+                        {
+                            "exception_type": "PRICE_VARIANCE",
+                            "severity": "MEDIUM",
+                            "confidence": 1.0,
+                            "mismatch_details": {
+                                "line_number": line_number,
+                                "variance": line["price_variance"],
+                            },
+                            "affected_lines": [line_number],
+                        }
+                    )
+                if line["quantity_variance"] != 0:
+                    exceptions.append(
+                        {
+                            "exception_type": "QUANTITY_VARIANCE",
+                            "severity": "HIGH" if line["quantity_variance"] > 0 else "MEDIUM",
+                            "confidence": 1.0,
+                            "mismatch_details": {
+                                "line_number": line_number,
+                                "variance": line["quantity_variance"],
+                            },
+                            "affected_lines": [line_number],
+                        }
+                    )
 
-            # 3. Tax Mismatch Check
-            tax_result = check_tax_mismatch(extracted_invoice, po_data)
-            tax_mismatch = tax_result["mismatch"]
-            if tax_mismatch:
-                exceptions.append({
-                    "exception_type": "TAX_MISMATCH",
-                    "severity": "MEDIUM",
-                    "confidence": 0.95,
-                    "mismatch_details": {"message": tax_result["message"]},
-                    "affected_lines": []
-                })
+            vendor = await session.get(Vendor, case.vendor_id) if case.vendor_id else None
+            if not vendor and extracted_invoice.get("vendor_name"):
+                normalized = normalize_vendor_name(extracted_invoice["vendor_name"])
+                vendor = await session.scalar(
+                    select(Vendor).where(
+                        Vendor.tenant_id == tenant_id,
+                        Vendor.normalized_legal_name == normalized,
+                    )
+                )
+                if vendor:
+                    case.vendor_id = vendor.vendor_id
+                    invoice_record.vendor_id = vendor.vendor_id
+            duplicate = False
+            if vendor:
+                duplicate = bool(
+                    await session.scalar(
+                        select(func.count())
+                        .select_from(InvoiceHistoryRecord)
+                        .where(
+                            InvoiceHistoryRecord.tenant_id == tenant_id,
+                            InvoiceHistoryRecord.vendor_id == str(vendor.vendor_id),
+                            func.lower(InvoiceHistoryRecord.invoice_number)
+                            == extracted_invoice["invoice_number"].lower(),
+                        )
+                    )
+                )
+            else:
+                reason_codes.append("VENDOR_UNRESOLVED")
+            if duplicate:
+                reason_codes.append("DUPLICATE_INVOICE")
+                exceptions.append(
+                    {
+                        "exception_type": "DUPLICATE_INVOICE",
+                        "severity": "CRITICAL",
+                        "confidence": 1.0,
+                        "mismatch_details": {"invoice_number": extracted_invoice["invoice_number"]},
+                        "affected_lines": [],
+                    }
+                )
 
-            # 4. Bank Account Verification & Risk Check
-            import hashlib
-            vendor = None
-            if extracted_invoice.get("vendor_name"):
-                vendor = (await session.execute(
-                    select(Vendor).where(func.lower(Vendor.legal_name).contains(extracted_invoice["vendor_name"].lower()))
-                )).scalars().first()
-
-            extracted_bank = extracted_invoice.get("bank_account")
-            registered_bank = "003-441-8821"
+            bank_field = await session.scalar(
+                select(ExtractedField).where(
+                    ExtractedField.document_id == invoice_document.document_id,
+                    ExtractedField.field_name == "bank_account",
+                )
+            )
             bank_mismatch = False
-            if extracted_bank and vendor and vendor.bank_account_hash:
-                extracted_hash = hashlib.sha256(extracted_bank.encode()).digest()
-                if extracted_hash != vendor.bank_account_hash:
-                    bank_mismatch = True
-            elif extracted_bank and extracted_bank != registered_bank and "003-772-9066" in extracted_bank:
-                bank_mismatch = True
-            elif "NSO-INV-2607182" in extracted_invoice.get("invoice_number", "") or "003-772-9066" in str(extracted_invoice):
-                bank_mismatch = True
-
-            if bank_mismatch and not any(e["exception_type"] == "UNVERIFIED_BANK_ACCOUNT_CHANGE" for e in exceptions):
-                exceptions.append({
-                    "exception_type": "UNVERIFIED_BANK_ACCOUNT_CHANGE",
-                    "severity": "HIGH",
-                    "confidence": 0.98,
-                    "mismatch_details": {
-                        "message": f"Remittance bank account on invoice ({extracted_bank or '003-772-9066'}) does not match registered vendor account ({registered_bank}). Manual verification required before payout."
-                    },
-                    "affected_lines": []
-                })
-
-            # 5. Tolerance Check using domain rules
-            threshold_amt = 50.0
-            threshold_pct = 5.0
-            within_tol = check_tolerance(overall_variance, variance_pct, threshold_amt, threshold_pct)
-            
-            tolerance_result = {
-                "within_tolerance": within_tol,
-                "threshold_amount": threshold_amt,
-                "threshold_pct": threshold_pct,
-                "actual_variance": overall_variance,
-                "policy_ref": "POLICY-INV-001",
-                "exception_type": "PRICE_VARIANCE" if overall_variance > 0 else None
-            }
-
-            risk_result = {
-                "disposition": "REQUIRES_REVIEW" if (bank_mismatch or duplicate_found or missing_po or tax_mismatch or not within_tol) else "CLEAR",
-                "fraud_signals": ["UNVERIFIED_BANK_ACCOUNT_CHANGE"] if bank_mismatch else [],
-                "duplicate_invoice_found": duplicate_found
-            }
-
-            # Dynamic Policy Clauses Selection
-            policy_clauses = []
-            if duplicate_found:
-                policy_clauses.append({
-                    "clause_id": "AP-001-4.1",
-                    "policy_code": "AP-001",
-                    "section": "4.1 Duplicate Invoice Prevention",
-                    "text": "Invoices matching existing vendor ID and invoice number must be blocked immediately as duplicate submissions."
-                })
-            if missing_po:
-                policy_clauses.append({
-                    "clause_id": "AP-001-2.1",
-                    "policy_code": "AP-001",
-                    "section": "2.1 No-PO No-Pay Policy",
-                    "text": "All supplier invoices must reference a valid approved Purchase Order unless explicitly exempted as emergency freight or utility."
-                })
-            if tax_mismatch:
-                policy_clauses.append({
-                    "clause_id": "AP-001-3.3",
-                    "policy_code": "AP-001",
-                    "section": "3.3 Tax Rate Compliance",
-                    "text": "Invoice tax rates must match the configured statutory reference rate (18% VAT). Discrepancies require tax reviewer approval."
-                })
+            bank_unverified = False
+            if bank_field:
+                if vendor and vendor.bank_account_hash:
+                    bank_mismatch = bank_field.normalized_value != vendor.bank_account_hash.hex()
+                else:
+                    bank_unverified = True
             if bank_mismatch:
-                policy_clauses.append({
-                    "clause_id": "AP-001-4.2",
-                    "policy_code": "AP-001",
-                    "section": "4.2 Bank Account Modification Rules",
-                    "text": "Any invoice requesting payment to a bank account different from the vendor master registry must be held for manual verification by Finance prior to payment release."
-                })
-            if overall_variance > 0:
-                policy_clauses.append({
-                    "clause_id": "AP-001-3.1",
-                    "policy_code": "AP-001",
-                    "section": "3.1 Three-Way Matching & Tolerances",
-                    "text": "Invoices with line item price variances under LKR 50.00 or 5% of line value may be approved under standard tolerance rules."
-                })
-            if any(e["exception_type"] == "QUANTITY_VARIANCE" for e in exceptions):
-                policy_clauses.append({
-                    "clause_id": "AP-001-3.2",
-                    "policy_code": "AP-001",
-                    "section": "3.2 Goods Receipt Quantity Tolerances",
-                    "text": "Invoice quantities exceeding accepted receipt quantities on GRN must be placed on HOLD pending warehouse verification."
-                })
-            if not policy_clauses:
-                policy_clauses.append({
-                    "clause_id": "AP-001-1.0",
-                    "policy_code": "AP-001",
-                    "section": "1.0 Standard Invoice Processing",
-                    "text": "Clean 3-way matched invoices with valid PO and GRN references are ready for standard AP approval."
-                })
+                reason_codes.append("UNVERIFIED_BANK_ACCOUNT_CHANGE")
+                exceptions.append(
+                    {
+                        "exception_type": "UNVERIFIED_BANK_ACCOUNT_CHANGE",
+                        "severity": "CRITICAL",
+                        "confidence": 1.0,
+                        "mismatch_details": {"message": "Invoice bank blind index differs from vendor master."},
+                        "affected_lines": [],
+                    }
+                )
+            elif bank_unverified:
+                reason_codes.append("BANK_ACCOUNT_UNVERIFIED")
 
-            evidence_packet = {
+            tax_result = check_tax_mismatch(extracted_invoice, po_data)
+            if tax_result["mismatch"]:
+                reason_codes.append("TAX_MISMATCH")
+                exceptions.append(
+                    {
+                        "exception_type": "TAX_MISMATCH",
+                        "severity": "HIGH",
+                        "confidence": 1.0,
+                        "mismatch_details": {"message": tax_result["message"]},
+                        "affected_lines": [],
+                    }
+                )
+            elif tax_result.get("unverified"):
+                reason_codes.append("TAX_POLICY_UNVERIFIED")
+
+            threshold_amount = Decimal("50.00")
+            threshold_pct = Decimal("5.00")
+            variance_amount = _decimal(match_result["overall_variance_amount"])
+            variance_pct = _decimal(match_result["overall_variance_pct"])
+            within_tolerance = (
+                abs(variance_amount) <= threshold_amount
+                and abs(variance_pct) <= threshold_pct
+                and not missing_po
+                and not missing_grn
+            )
+            if not within_tolerance:
+                reason_codes.append("EXCEEDS_TOLERANCE")
+            reason_codes = sorted(set(reason_codes or ["CLEAN_THREE_WAY_MATCH"]))
+            policies = await _policy_clauses(tenant_id, reason_codes)
+            if not policies:
+                case.status = CaseStatus.VERIFICATION_FAILED
+                case.current_version += 1
+                run.status = "BLOCKED"
+                run.current_node = "policy_evidence_unavailable"
+                run.state_json = {
+                    **run.state_json,
+                    "reason_code": "INSUFFICIENT_POLICY_EVIDENCE",
+                }
+                await append_case_event(
+                    session,
+                    tenant_id=tenant_id,
+                    case_id=case_id,
+                    event_type="VERIFICATION_FAILED",
+                    actor_type="SYSTEM",
+                    actor_id="invoice-worker",
+                    payload={"reason_code": "INSUFFICIENT_POLICY_EVIDENCE"},
+                )
+                session.add(InboxReceipt(consumer_name="invoice-worker", event_id=event_id, tenant_id=tenant_id))
+                return
+
+            tolerance = {
+                "within_tolerance": within_tolerance,
+                "threshold_amount": float(threshold_amount),
+                "threshold_pct": float(threshold_pct),
+                "actual_variance": float(variance_amount),
+                "policy_ref": [
+                    {"policy_version_id": item["policy_version_id"], "clause_id": item["clause_id"]}
+                    for item in policies
+                ],
+            }
+            recommendation = (
+                "BLOCK_DUPLICATE"
+                if duplicate
+                else "HOLD"
+                if bank_mismatch or missing_grn
+                else "REQUEST_INFORMATION"
+                if missing_po or not vendor
+                else "REVIEW_REQUIRED"
+                if exceptions or not within_tolerance
+                else "APPROVE_FOR_PAYMENT"
+            )
+            packet = {
                 "case_id": str(case_id),
                 "run_id": str(run_id),
-                "recommendation": "BLOCKED_DUPLICATE" if duplicate_found else ("HOLD" if (bank_mismatch or any(e["exception_type"] == "QUANTITY_VARIANCE" for e in exceptions)) else ("REJECT_PAYOUT" if not within_tol else "RESOLVE_EXCEPTION")),
-                "reason_codes": [e["exception_type"] for e in exceptions] if exceptions else ["WITHIN_TOLERANCE"],
+                "recommendation": recommendation,
+                "reason_codes": reason_codes,
                 "extracted_invoice": extracted_invoice,
                 "match_result": match_result,
                 "exception": exceptions,
-                "tolerance": tolerance_result,
-                "risk": risk_result,
-                "policy_clauses": policy_clauses,
-                "evidence": [],
-                "unresolved_items": []
+                "tolerance": tolerance,
+                "risk": {
+                    "disposition": "REQUIRES_REVIEW" if reason_codes != ["CLEAN_THREE_WAY_MATCH"] else "CLEAR",
+                    "duplicate_invoice_found": duplicate,
+                    "bank_account_compared_by_blind_index": bool(bank_field and vendor),
+                },
+                "policy_clauses": policies,
+                "reference_source": reference_source,
+                "unresolved_items": [
+                    code
+                    for code in reason_codes
+                    if code
+                    in {
+                        "MISSING_VERIFIED_PO",
+                        "MISSING_ACCEPTED_GRN",
+                        "VENDOR_UNRESOLVED",
+                        "BANK_ACCOUNT_UNVERIFIED",
+                        "TAX_POLICY_UNVERIFIED",
+                    }
+                ],
             }
+            evidence_hash = canonical_hash(packet)
 
-            # Create EvidenceItem records in database for UI rendering
-            session.add(EvidenceItem(
-                tenant_id=tenant_id, case_id=case_id, run_id=run_id,
-                source_type="DOCUMENT_PARSER", source_id=str(invoice_document.document_id) if invoice_document else "doc-1",
-                source_locator={"invoice_number": extracted_invoice.get("invoice_number")},
-                claim=f"Extracted invoice {extracted_invoice.get('invoice_number')} from {extracted_invoice.get('vendor_name')} with total amount {extracted_invoice.get('currency', 'LKR')} {extracted_invoice.get('total_amount'):,.2f}.",
-                reason_code="INVOICE_EXTRACTED", confidence=0.95
-            ))
+            session.add(
+                EvidenceItem(
+                    tenant_id=tenant_id,
+                    case_id=case_id,
+                    run_id=run_id,
+                    source_type="DOCUMENT_PARSER",
+                    source_id=str(invoice_document.document_id),
+                    source_locator={"document_id": str(invoice_document.document_id)},
+                    claim=(
+                        f"Invoice {extracted_invoice['invoice_number']} extracted locally with "
+                        f"{len(extracted_invoice['line_items'])} line items."
+                    ),
+                    reason_code="INVOICE_EXTRACTED",
+                    confidence=0.85,
+                )
+            )
+            session.add(
+                EvidenceItem(
+                    tenant_id=tenant_id,
+                    case_id=case_id,
+                    run_id=run_id,
+                    source_type="THREE_WAY_MATCH",
+                    source_id=reference_source,
+                    source_locator={
+                        "po_number": po_data.get("po_number"),
+                        "line_count": len(match_result["line_matches"]),
+                    },
+                    claim=f"Three-way match disposition: {match_result['match_status']}.",
+                    reason_code=match_result["match_status"],
+                    confidence=1.0,
+                )
+            )
+            for exception in exceptions:
+                session.add(
+                    InvoiceException(
+                        tenant_id=tenant_id,
+                        case_id=case_id,
+                        invoice_id=invoice_record.invoice_id,
+                        exception_type=exception["exception_type"],
+                        severity=exception["severity"],
+                        mismatch_details=exception["mismatch_details"],
+                        variance_amount=float(variance_amount),
+                        variance_pct=float(variance_pct),
+                        tolerance_threshold_amount=float(threshold_amount),
+                        tolerance_threshold_pct=float(threshold_pct),
+                        within_tolerance=within_tolerance,
+                        resolution_status="OPEN",
+                        policy_reference=canonical_hash(policies),
+                    )
+                )
 
-            if duplicate_found:
-                session.add(EvidenceItem(
-                    tenant_id=tenant_id, case_id=case_id, run_id=run_id,
-                    source_type="INVOICE_HISTORY", source_id="history-db",
-                    source_locator={"invoice_number": extracted_invoice.get("invoice_number")},
-                    claim=dup_result["message"],
-                    reason_code="DUPLICATE_INVOICE", confidence=0.99
-                ))
-
-            if missing_po:
-                session.add(EvidenceItem(
-                    tenant_id=tenant_id, case_id=case_id, run_id=run_id,
-                    source_type="PO_REGISTRY", source_id="po-db",
-                    source_locator={},
-                    claim="Purchase order reference not stated on invoice and no PO document attached.",
-                    reason_code="MISSING_PO", confidence=0.95
-                ))
-
-            if tax_mismatch:
-                session.add(EvidenceItem(
-                    tenant_id=tenant_id, case_id=case_id, run_id=run_id,
-                    source_type="TAX_ENGINE", source_id="tax-policy",
-                    source_locator={"extracted_tax_rate": extracted_invoice.get("tax_rate")},
-                    claim=tax_result["message"],
-                    reason_code="TAX_MISMATCH", confidence=0.95
-                ))
-
-            if bank_mismatch:
-                session.add(EvidenceItem(
-                    tenant_id=tenant_id, case_id=case_id, run_id=run_id,
-                    source_type="BANK_REGISTRY", source_id=str(vendor.vendor_id) if vendor else "vendor-master",
-                    source_locator={"extracted_bank": extracted_bank or "003-772-9066"},
-                    claim=f"HIGH RISK: Remittance bank account ({extracted_bank or '003-772-9066'}) does not match registered vendor account ({registered_bank}). Payout blocked pending manual verification.",
-                    reason_code="UNVERIFIED_BANK_ACCOUNT", confidence=0.98
-                ))
+            if missing_po or not vendor:
+                await _request_clarification(
+                    session,
+                    tenant_id=tenant_id,
+                    case=case,
+                    run=run,
+                    reason_code="MANDATORY_REFERENCE_MISSING",
+                    questions=[
+                        {
+                            "question_id": code.lower(),
+                            "text": f"Resolve mandatory control: {code}.",
+                            "field_name": code.lower(),
+                            "requested_from_role": "requester",
+                        }
+                        for code in reason_codes
+                        if code in {"MISSING_VERIFIED_PO", "VENDOR_UNRESOLVED"}
+                    ],
+                )
             else:
-                session.add(EvidenceItem(
-                    tenant_id=tenant_id, case_id=case_id, run_id=run_id,
-                    source_type="BANK_REGISTRY", source_id=str(vendor.vendor_id) if vendor else "vendor-master",
-                    source_locator={},
-                    claim="Remittance bank account matches registered vendor master records.",
-                    reason_code="BANK_ACCOUNT_VERIFIED", confidence=0.99
-                ))
-
-            if overall_variance > 0:
-                session.add(EvidenceItem(
-                    tenant_id=tenant_id, case_id=case_id, run_id=run_id,
-                    source_type="ERP_MATCH_ENGINE", source_id="mock-erp",
-                    source_locator={"variance": overall_variance},
-                    claim=f"3-Way match result: PARTIAL_MATCH with price variance of {extracted_invoice.get('currency', 'LKR')} {overall_variance:.2f}.",
-                    reason_code="PRICE_VARIANCE", confidence=0.92
-                ))
-            else:
-                session.add(EvidenceItem(
-                    tenant_id=tenant_id, case_id=case_id, run_id=run_id,
-                    source_type="ERP_MATCH_ENGINE", source_id="mock-erp",
-                    source_locator={"variance": 0.0},
-                    claim="3-Way match result: MATCHED. Invoice line items match Purchase Order and GRN.",
-                    reason_code="THREE_WAY_MATCH_SUCCESS", confidence=0.99
-                ))
-
-            session.add(EvidenceItem(
-                tenant_id=tenant_id, case_id=case_id, run_id=run_id,
-                source_type="POLICY_ENGINE", source_id="POLICY-INV-001",
-                source_locator={"threshold": threshold_amt},
-                claim=f"Price variance is {'within' if within_tol else 'exceeds'} allowable policy threshold (LKR {threshold_amt:.2f} / {threshold_pct:.0f}%).",
-                reason_code="WITHIN_TOLERANCE" if within_tol else "EXCEEDS_TOLERANCE", confidence=1.0
-            ))
-            
-            # Status Routing & Task Generation
-            run.status = "COMPLETED"
-            run.completed_at = datetime.now(UTC)
-
-            if duplicate_found:
-                case.status = CaseStatus.BLOCKED_DUPLICATE
-                case.current_version += 1
-                task_type = "DUPLICATE_REVIEW"
-                assigned_role = "finance_approver"
-                run.current_node = "duplicate_blocked"
-
-                session.add(ApprovalTask(
-                    tenant_id=tenant_id, case_id=case_id, run_id=run_id,
-                    task_type=task_type, status="PENDING",
-                    assigned_role=assigned_role, proposed_action={"action": "BLOCK_DUPLICATE"},
-                    evidence_packet=evidence_packet, evidence_hash="0000000000000000000000000000000000000000000000000000000000000000", case_version=case.current_version
-                ))
-                await append_case_event(session, tenant_id=tenant_id, case_id=case_id, event_type="DUPLICATE_INVOICE_BLOCKED", actor_type="SYSTEM", actor_id="invoice-worker", payload={"reason": dup_result["message"]})
-
-            elif missing_po:
-                case.status = CaseStatus.NEEDS_CLARIFICATION
-                case.current_version += 1
-                run.current_node = "clarification_interrupt"
-
-                session.add(ClarificationTask(
-                    tenant_id=tenant_id, case_id=case_id, run_id=run_id,
-                    status="OPEN",
-                    questions=[{
-                        "question_id": "q1",
-                        "text": "Purchase order reference is missing on invoice and no PO document attached. Please provide valid PO reference or justification for emergency service.",
-                        "field_name": "po_reference",
-                        "requested_from_role": "requester"
-                    }]
-                ))
-                await append_case_event(session, tenant_id=tenant_id, case_id=case_id, event_type="CLARIFICATION_REQUESTED", actor_type="SYSTEM", actor_id="invoice-worker", payload={"reason": "Missing PO reference"})
-
-            elif bank_mismatch or any(e["exception_type"] == "QUANTITY_VARIANCE" for e in exceptions):
-                case.status = CaseStatus.HOLD
-                case.current_version += 1
-                task_type = "INVOICE_EXCEPTION_RESOLUTION"
-                assigned_role = "finance_approver"
-                run.current_node = "approval_interrupt"
-
-                session.add(ApprovalTask(
-                    tenant_id=tenant_id, case_id=case_id, run_id=run_id,
-                    task_type=task_type, status="PENDING",
-                    assigned_role=assigned_role, proposed_action={"action": "RESOLVE_EXCEPTION"},
-                    evidence_packet=evidence_packet, evidence_hash="0000000000000000000000000000000000000000000000000000000000000000", case_version=case.current_version
-                ))
-                await append_case_event(session, tenant_id=tenant_id, case_id=case_id, event_type="CASE_PLACED_ON_HOLD", actor_type="SYSTEM", actor_id="invoice-worker", payload={"reason": "Manual verification required"})
-
-            else:
-                case.status = CaseStatus.APPROVAL_PENDING
-                case.current_version += 1
-                if tax_mismatch:
-                    task_type = "TAX_REVIEW"
-                    assigned_role = "finance_approver"
-                elif overall_variance > 0 and not within_tol:
-                    task_type = "PROCUREMENT_REVIEW"
-                    assigned_role = "procurement_approver"
+                if duplicate:
+                    case.status = CaseStatus.BLOCKED_DUPLICATE
+                    task_type = "DUPLICATE_REVIEW"
+                elif bank_mismatch or missing_grn:
+                    case.status = CaseStatus.HOLD
+                    task_type = "INVOICE_EXCEPTION_RESOLUTION"
                 else:
+                    case.status = CaseStatus.APPROVAL_PENDING
                     task_type = "INVOICE_AP_APPROVAL"
-                    assigned_role = "finance_approver"
-
+                case.current_version += 1
+                run.status = "INTERRUPTED"
                 run.current_node = "approval_interrupt"
-
-                session.add(ApprovalTask(
-                    tenant_id=tenant_id, case_id=case_id, run_id=run_id,
-                    task_type=task_type, status="PENDING",
-                    assigned_role=assigned_role, proposed_action={"action": "RESOLVE_EXCEPTION"},
-                    evidence_packet=evidence_packet, evidence_hash="0000000000000000000000000000000000000000000000000000000000000000", case_version=case.current_version
-                ))
-                await append_case_event(session, tenant_id=tenant_id, case_id=case_id, event_type="APPROVAL_REQUIRED", actor_type="SYSTEM", actor_id="invoice-worker", payload={"reason": "Approval required"})
-
+                run.state_json = {
+                    "evidence_hash": evidence_hash,
+                    "recommendation": recommendation,
+                    "reason_codes": reason_codes,
+                }
+                session.add(
+                    ApprovalTask(
+                        tenant_id=tenant_id,
+                        case_id=case_id,
+                        run_id=run_id,
+                        task_type=task_type,
+                        status="PENDING",
+                        assigned_role="finance_approver",
+                        proposed_action={
+                            "action": "RESOLVE_INVOICE_EXCEPTION",
+                            "payload": {
+                                "invoice_id": str(invoice_record.invoice_id),
+                                "recommendation": recommendation,
+                            },
+                        },
+                        evidence_packet=packet,
+                        evidence_hash=evidence_hash,
+                        case_version=case.current_version,
+                    )
+                )
+                await append_case_event(
+                    session,
+                    tenant_id=tenant_id,
+                    case_id=case_id,
+                    event_type="APPROVAL_REQUIRED",
+                    actor_type="SYSTEM",
+                    actor_id="invoice-worker",
+                    payload={
+                        "run_id": str(run_id),
+                        "reason_codes": reason_codes,
+                        "evidence_hash": evidence_hash,
+                    },
+                )
+            await append_audit(
+                session,
+                tenant_id=tenant_id,
+                case_id=case_id,
+                actor_type="SYSTEM",
+                actor_id="invoice-worker",
+                action="INVOICE_ANALYSIS_COMPLETED",
+                resource_type="AGENT_RUN",
+                resource_id=str(run_id),
+                metadata={
+                    "evidence_hash": evidence_hash,
+                    "reason_codes": reason_codes,
+                    "reference_source": reference_source,
+                },
+            )
             session.add(InboxReceipt(consumer_name="invoice-worker", event_id=event_id, tenant_id=tenant_id))
 
 
-async def dispatch(envelope: dict) -> None:
-    event_type = envelope["event_type"]
-    if event_type == "invoice.submitted.v1":
+async def dispatch(envelope: dict[str, Any]) -> None:
+    if envelope["event_type"] == "invoice.submitted.v1":
         await handle_invoice_submitted(envelope)
-    elif event_type == "invoice.analysis.requested.v1":
+    elif envelope["event_type"] == "invoice.analysis.requested.v1":
         await run_invoice_analysis(envelope)
-    elif event_type == "invoice.resolution.approved.v1":
-        # Handled by erp sync worker, but invoice worker can update case status if needed
-        pass
 
 
 if __name__ == "__main__":
-    asyncio.run(consume("invoice-worker", [
-        "invoice.submitted.v1",
-        "invoice.analysis.requested.v1",
-        "invoice.resolution.approved.v1",
-    ], dispatch))
+    asyncio.run(
+        consume(
+            "invoice-worker",
+            ["invoice.submitted.v1", "invoice.analysis.requested.v1"],
+            dispatch,
+        )
+    )

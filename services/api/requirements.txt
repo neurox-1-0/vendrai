@@ -15,4 +15,3 @@ python-multipart==0.0.31
 pytest==9.0.3
 pytest-asyncio==1.4.0
 aiosqlite==0.22.1
-google-genai==0.6.0

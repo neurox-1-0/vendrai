@@ -11,7 +11,7 @@ from app.config import settings
 from app.database import get_db
 from app.domain.cases import CaseStatus, assert_transition
 from app.domain.security import blind_index, encrypt_sensitive_value, normalize_vendor_name
-from app.models import Case, ClarificationTask, Document, ExtractedField
+from app.models import Case, ClarificationTask, Document, ExtractedField, InvoiceRecord
 from app.schemas import ClarificationResponseRequest
 from app.services.events import append_audit, append_case_event, enqueue_event
 
@@ -34,14 +34,35 @@ async def respond(
         raise HTTPException(404, detail={"code": "CLARIFICATION_TASK_NOT_FOUND"})
     if task.status != "OPEN":
         raise HTTPException(409, detail={"code": "CLARIFICATION_ALREADY_ANSWERED"})
-    case = await db.scalar(select(Case).where(Case.case_id == task.case_id).with_for_update())
+    case = await db.scalar(
+        select(Case)
+        .where(
+            Case.case_id == task.case_id,
+            Case.tenant_id == principal.tenant_id,
+        )
+        .with_for_update()
+    )
+    if not case:
+        raise HTTPException(404, detail={"code": "CLARIFICATION_TASK_NOT_FOUND"})
     if principal.roles == {"requester"} and case.requester_user_id != principal.user_id:
         raise HTTPException(404, detail={"code": "CLARIFICATION_TASK_NOT_FOUND"})
     if if_match != body.expected_version or case.current_version != body.expected_version:
         raise HTTPException(409, detail={"code": "STALE_CASE_VERSION", "current_version": case.current_version})
-    assert_transition(case.status, CaseStatus.SPECIALIST_ANALYSIS)
+    resume_status = (
+        CaseStatus.INVOICE_MATCHING
+        if case.case_type == "INVOICE_EXCEPTION"
+        else CaseStatus.SPECIALIST_ANALYSIS
+    )
+    assert_transition(case.status, resume_status)
     task.status = "ANSWERED"
-    first_document = await db.scalar(select(Document).where(Document.case_id == case.case_id).order_by(Document.created_at))
+    first_document = await db.scalar(
+        select(Document)
+        .where(
+            Document.case_id == case.case_id,
+            Document.tenant_id == principal.tenant_id,
+        )
+        .order_by(Document.created_at)
+    )
     if not first_document:
         raise HTTPException(409, detail={"code": "DOCUMENT_REQUIRED"})
     sensitive_fields = {"tax_id", "bank_account", "swift_code", "address", "email", "phone"}
@@ -51,7 +72,14 @@ async def respond(
         if not answer:
             continue
         field = await db.scalar(
-            select(ExtractedField).join(Document).where(Document.case_id == case.case_id, ExtractedField.field_name == field_name)
+            select(ExtractedField)
+            .join(Document)
+            .where(
+                Document.case_id == case.case_id,
+                Document.tenant_id == principal.tenant_id,
+                ExtractedField.tenant_id == principal.tenant_id,
+                ExtractedField.field_name == field_name,
+            )
         )
         if not field:
             field = ExtractedField(
@@ -71,15 +99,29 @@ async def respond(
             safe_response[field_name] = answer
         field.confidence = 1.0
         field.human_verified = True
+        if case.case_type == "INVOICE_EXCEPTION" and field_name in {"po_reference", "po_number"}:
+            invoice = await db.scalar(
+                select(InvoiceRecord).where(
+                    InvoiceRecord.case_id == case.case_id,
+                    InvoiceRecord.tenant_id == principal.tenant_id,
+                )
+            )
+            if invoice:
+                invoice.po_number = answer
     task.response = safe_response
     task.responded_by = principal.user_id
     task.responded_at = datetime.now(UTC)
-    case.status = CaseStatus.SPECIALIST_ANALYSIS
+    case.status = resume_status
     case.current_version += 1
     await append_case_event(db, tenant_id=principal.tenant_id, case_id=case.case_id, event_type="CLARIFICATION_ANSWERED", actor_type="USER", actor_id=str(principal.user_id), payload={"task_id": str(task_id)})
     enqueue_event(
         db, tenant_id=principal.tenant_id, aggregate_type="case", aggregate_id=case.case_id,
-        aggregate_version=case.current_version, event_type="agent.analysis.requested.v1",
+        aggregate_version=case.current_version,
+        event_type=(
+            "invoice.analysis.requested.v1"
+            if case.case_type == "INVOICE_EXCEPTION"
+            else "agent.analysis.requested.v1"
+        ),
         idempotency_key=f"clarification.response:{task_id}:{idempotency_key}",
         payload={"case_id": str(case.case_id), "run_id": str(task.run_id)},
     )

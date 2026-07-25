@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 class ApiMeta(BaseModel):
     request_id: str
@@ -184,3 +184,23 @@ class InvoiceSubmissionRequest(BaseModel):
     po_number: str | None = Field(default=None, max_length=50)
     vendor_id: UUID | None = None
 
+    @model_validator(mode="after")
+    def require_documents(self) -> "InvoiceSubmissionRequest":
+        if not self.document_id and not self.document_ids:
+            raise ValueError("At least one document is required")
+        if len(set(self.document_ids)) > 10:
+            raise ValueError("At most 10 documents may be submitted")
+        return self
+
+
+class InvoiceDraftRequest(BaseModel):
+    invoice_number: str = Field(min_length=1, max_length=120)
+    priority: Literal["LOW", "NORMAL", "HIGH", "URGENT"] = "NORMAL"
+    po_number: str | None = Field(default=None, max_length=80)
+    vendor_id: UUID | None = None
+    currency: str = Field(default="LKR", min_length=3, max_length=3, pattern=r"^[A-Z]{3}$")
+
+    @field_validator("invoice_number")
+    @classmethod
+    def clean_invoice_number(cls, value: str) -> str:
+        return " ".join(value.split())

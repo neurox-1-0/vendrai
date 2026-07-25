@@ -51,7 +51,14 @@ async def get_principal(
         tenant_id = UUID(x_dev_tenant_id or settings.DEV_TENANT_ID)
         user_id = UUID(x_dev_user_id or settings.DEV_USER_ID)
         roles = frozenset((x_dev_roles or "requester,analyst,approver,auditor,admin").split(","))
-        principal = Principal(tenant_id, user_id, f"dev:{user_id}", "dev@neurox.local", "Development User", roles)
+        principal = Principal(
+            tenant_id,
+            user_id,
+            f"dev:{user_id}",
+            f"dev+{user_id}@neurox.local",
+            "Development User",
+            roles,
+        )
     else:
         if not authorization or not authorization.startswith("Bearer "):
             raise HTTPException(status_code=401, detail={"code": "AUTH_REQUIRED"})

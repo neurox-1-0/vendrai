@@ -8,7 +8,16 @@ from sqlalchemy import select
 from app.config import settings
 from app.domain.cases import CaseStatus
 from app.domain.security import normalize_vendor_name
-from app.models import ApprovalTask, Case, ErpOperation, InboxReceipt, Notification, Vendor
+from app.models import (
+    ApprovalTask,
+    Case,
+    ErpOperation,
+    InboxReceipt,
+    InvoiceHistoryRecord,
+    InvoiceRecord,
+    Notification,
+    Vendor,
+)
 from app.services.events import append_audit, append_case_event, enqueue_event
 from app.workers.common import consume
 from app.workers.database import WorkerSession, set_worker_tenant
@@ -139,7 +148,34 @@ async def sync_invoice_resolution(envelope: dict) -> None:
                 operation.status = "SUCCEEDED"
                 operation.response_payload = result
                 operation.provider_reference = result.get("resolution_id")
-                
+                invoice = await session.scalar(
+                    select(InvoiceRecord).where(
+                        InvoiceRecord.tenant_id == tenant_id,
+                        InvoiceRecord.case_id == case_id,
+                    )
+                )
+                if invoice:
+                    invoice.status = "RESOLVED"
+                    if invoice.vendor_id:
+                        history = await session.scalar(
+                            select(InvoiceHistoryRecord).where(
+                                InvoiceHistoryRecord.tenant_id == tenant_id,
+                                InvoiceHistoryRecord.vendor_id == str(invoice.vendor_id),
+                                InvoiceHistoryRecord.invoice_number == invoice.invoice_number,
+                            )
+                        )
+                        if not history:
+                            session.add(
+                                InvoiceHistoryRecord(
+                                    tenant_id=tenant_id,
+                                    vendor_id=str(invoice.vendor_id),
+                                    invoice_number=invoice.invoice_number,
+                                    gross_amount=invoice.total_amount,
+                                    currency=invoice.currency,
+                                    po_number=invoice.po_number,
+                                    status="RESOLVED",
+                                )
+                            )
                 case.status = CaseStatus.COMPLETED
                 case.current_version += 1
                 case.resolved_at = datetime.now(UTC)

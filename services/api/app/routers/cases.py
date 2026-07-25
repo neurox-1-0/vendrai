@@ -127,6 +127,7 @@ async def submit_case(case_id: uuid.UUID, db: Db, principal: CurrentPrincipal, i
     case.submitted_at = datetime.now(UTC)
     run = AgentRun(
         tenant_id=principal.tenant_id, case_id=case.case_id, thread_id=f"case:{case.case_id}:v{case.current_version}",
+        graph_name="invoice_exception" if case.case_type == "INVOICE_EXCEPTION" else "vendor_onboarding",
         status="QUEUED", current_node="document_processing", state_json={"case_id": str(case.case_id)},
     )
     db.add(run)
@@ -137,7 +138,9 @@ async def submit_case(case_id: uuid.UUID, db: Db, principal: CurrentPrincipal, i
     )
     enqueue_event(
         db, tenant_id=principal.tenant_id, aggregate_type="case", aggregate_id=case.case_id,
-        aggregate_version=case.current_version, event_type="case.submitted.v1", idempotency_key=scoped_key,
+        aggregate_version=case.current_version,
+        event_type="invoice.submitted.v1" if case.case_type == "INVOICE_EXCEPTION" else "case.submitted.v1",
+        idempotency_key=scoped_key,
         payload={"case_id": str(case.case_id), "run_id": str(run.run_id)},
     )
     await append_audit(

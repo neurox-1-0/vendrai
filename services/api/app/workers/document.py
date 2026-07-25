@@ -163,6 +163,7 @@ async def process_document_event(envelope: dict) -> None:
             if not document or document.tenant_id != tenant_id:
                 raise RuntimeError("DOCUMENT_NOT_FOUND_OR_TENANT_MISMATCH")
             case = await session.scalar(select(Case).where(Case.case_id == document.case_id).with_for_update())
+            case_was_draft = case.status == CaseStatus.DRAFT
             source = settings.LOCAL_STORAGE_ROOT.resolve() / "quarantine" / str(tenant_id) / str(document_id)
             clean, scan_result = await asyncio.to_thread(scan_with_clamav, source)
             if not clean:
@@ -174,7 +175,8 @@ async def process_document_event(envelope: dict) -> None:
                 return
             document.malware_status = "CLEAN"
             document.processing_status = "PROCESSING"
-            case.status = CaseStatus.DOCUMENT_PROCESSING
+            if not case_was_draft:
+                case.status = CaseStatus.DOCUMENT_PROCESSING
             extension = {"application/pdf": ".pdf", "image/png": ".png", "image/jpeg": ".jpg"}.get(document.mime_type, "")
             destination = settings.LOCAL_STORAGE_ROOT.resolve() / "documents" / str(tenant_id) / f"{document_id}{extension}"
             destination.parent.mkdir(parents=True, exist_ok=True)
@@ -211,6 +213,19 @@ async def process_document_event(envelope: dict) -> None:
             await session.flush()
             remaining = await session.scalar(select(func.count()).select_from(Document).where(Document.case_id == case.case_id, Document.processing_status != "READY"))
             if remaining == 0:
+                if case_was_draft:
+                    case.status = CaseStatus.DRAFT
+                    await append_case_event(
+                        session,
+                        tenant_id=tenant_id,
+                        case_id=case.case_id,
+                        event_type="DRAFT_DOCUMENTS_READY",
+                        actor_type="SYSTEM",
+                        actor_id="document-worker",
+                        payload={"document_id": str(document_id)},
+                    )
+                    session.add(InboxReceipt(consumer_name="document-worker", event_id=event_id, tenant_id=tenant_id))
+                    return
                 case.current_version += 1
                 run_id = envelope["payload"].get("run_id")
                 if not run_id:

@@ -1,8 +1,9 @@
 import uuid
 from datetime import datetime
+from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, Index, Integer, LargeBinary, Numeric, String, Text, UniqueConstraint, func
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Index, Integer, LargeBinary, Numeric, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import JSON, Uuid
@@ -60,7 +61,7 @@ class InvoiceHistoryRecord(Base, TimestampMixin):
     vendor_id: Mapped[str] = mapped_column(String(50), index=True)
     invoice_number: Mapped[str] = mapped_column(String(120), index=True)
     invoice_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    gross_amount: Mapped[float] = mapped_column(Float, default=0.0)
+    gross_amount: Mapped[Decimal] = mapped_column(Numeric(19, 4), default=Decimal("0"))
     currency: Mapped[str] = mapped_column(String(3), default="LKR")
     po_number: Mapped[str | None] = mapped_column(String(80))
     status: Mapped[str] = mapped_column(String(32), default="PAID")
@@ -503,7 +504,7 @@ class PurchaseOrder(Base, TimestampMixin):
     tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.tenant_id"), index=True)
     vendor_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("vendors.vendor_id"), index=True)
     po_number: Mapped[str] = mapped_column(String(80))
-    total_amount: Mapped[float]
+    total_amount: Mapped[Decimal] = mapped_column(Numeric(19, 4))
     currency: Mapped[str] = mapped_column(String(3), default="USD")
     status: Mapped[str] = mapped_column(String(30), default="OPEN")
     issued_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -518,10 +519,10 @@ class PurchaseOrderLine(Base):
     purchase_order_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("purchase_orders.purchase_order_id", ondelete="CASCADE"), index=True)
     line_number: Mapped[int] = mapped_column(Integer)
     item_description: Mapped[str] = mapped_column(Text)
-    quantity: Mapped[float]
-    unit_price: Mapped[float]
-    amount: Mapped[float]
-    tax_rate: Mapped[float] = mapped_column(default=0.0)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(19, 4))
+    unit_price: Mapped[Decimal] = mapped_column(Numeric(19, 4))
+    amount: Mapped[Decimal] = mapped_column(Numeric(19, 4))
+    tax_rate: Mapped[Decimal] = mapped_column(Numeric(9, 4), default=Decimal("0"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -545,7 +546,7 @@ class GoodsReceiptLine(Base):
     goods_receipt_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("goods_receipts.goods_receipt_id", ondelete="CASCADE"), index=True)
     po_line_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("purchase_order_lines.po_line_id"), index=True)
     line_number: Mapped[int] = mapped_column(Integer)
-    quantity_received: Mapped[float]
+    quantity_received: Mapped[Decimal] = mapped_column(Numeric(19, 4))
     quality_status: Mapped[str] = mapped_column(String(30), default="ACCEPTED")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -562,8 +563,8 @@ class InvoiceRecord(Base, TimestampMixin):
     vendor_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("vendors.vendor_id"), index=True)
     invoice_number: Mapped[str] = mapped_column(String(120))
     po_number: Mapped[str | None] = mapped_column(String(80))
-    total_amount: Mapped[float]
-    tax_amount: Mapped[float] = mapped_column(default=0.0)
+    total_amount: Mapped[Decimal] = mapped_column(Numeric(19, 4))
+    tax_amount: Mapped[Decimal] = mapped_column(Numeric(19, 4), default=Decimal("0"))
     currency: Mapped[str] = mapped_column(String(3), default="USD")
     invoice_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     due_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -579,10 +580,10 @@ class InvoiceLine(Base):
     invoice_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("invoices.invoice_id", ondelete="CASCADE"), index=True)
     line_number: Mapped[int] = mapped_column(Integer)
     description: Mapped[str] = mapped_column(Text)
-    quantity: Mapped[float]
-    unit_price: Mapped[float]
-    amount: Mapped[float]
-    tax_rate: Mapped[float] = mapped_column(default=0.0)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(19, 4))
+    unit_price: Mapped[Decimal] = mapped_column(Numeric(19, 4))
+    amount: Mapped[Decimal] = mapped_column(Numeric(19, 4))
+    tax_rate: Mapped[Decimal] = mapped_column(Numeric(9, 4), default=Decimal("0"))
     po_line_ref: Mapped[str | None] = mapped_column(String(80))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -596,10 +597,10 @@ class InvoiceException(Base, TimestampMixin):
     exception_type: Mapped[str] = mapped_column(String(40))
     severity: Mapped[str] = mapped_column(String(20), default="MEDIUM")
     mismatch_details: Mapped[dict[str, Any]] = mapped_column(JSONType, default=dict)
-    variance_amount: Mapped[float | None]
-    variance_pct: Mapped[float | None]
-    tolerance_threshold_amount: Mapped[float | None]
-    tolerance_threshold_pct: Mapped[float | None]
+    variance_amount: Mapped[Decimal | None] = mapped_column(Numeric(19, 4))
+    variance_pct: Mapped[Decimal | None] = mapped_column(Numeric(9, 4))
+    tolerance_threshold_amount: Mapped[Decimal | None] = mapped_column(Numeric(19, 4))
+    tolerance_threshold_pct: Mapped[Decimal | None] = mapped_column(Numeric(9, 4))
     within_tolerance: Mapped[bool | None] = mapped_column(Boolean)
     resolution_status: Mapped[str] = mapped_column(String(30), default="OPEN")
     resolution_details: Mapped[dict[str, Any]] = mapped_column(JSONType, default=dict)
