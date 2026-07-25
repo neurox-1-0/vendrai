@@ -1,6 +1,6 @@
-# NeuroX enterprise supplier onboarding
+# NeuroX enterprise vendor-to-pay recovery platform
 
-NeuroX is an evidence-driven supplier-onboarding vertical slice. Deterministic controls own authorization, tenant isolation, sanctions blocking, duplicate scoring, approvals and ERP authorization. LLM reasoning is optional, bounded and never receives raw documents or sensitive identifiers.
+NeuroX currently contains an evidence-driven supplier-onboarding platform and a recovered invoice-exception slice. Deterministic controls own authorization, tenant isolation, sanctions/duplicate blocking, three-way matching, approvals and ERP authorization. LLM reasoning is optional, bounded and never receives raw documents or sensitive identifiers.
 
 ## Runtime boundaries
 
@@ -10,6 +10,7 @@ NeuroX is an evidence-driven supplier-onboarding vertical slice. Deterministic c
 - `document-worker`: quarantine, ClamAV, native PDF parsing, Docling/Tesseract/EasyOCR and local masking.
 - `retrieval-worker` / `retrieval-api`: local dense+sparse policy index, RRF and reranking.
 - `agent-worker`: deterministic duplicate/sanctions/policy aggregation and approval interruption.
+- `invoice-worker`: local extraction, PO/GRN matching, policy evidence and invoice approval interruption.
 - `notification-worker`: independent in-app/email delivery and delayed retries.
 - `erp-worker` / `mock-erp`: evidence-bound, idempotent vendor creation.
 
@@ -23,7 +24,7 @@ Requirements: Docker Compose, Node.js 22.17+ and Python 3.12+.
 cp .env.example .env
 ```
 
-Replace every `CHANGE_ME` value with independently generated secrets. External LLM calls are disabled by default and are not required for the deterministic onboarding path.
+Replace every `CHANGE_ME` value with independently generated secrets. External LLM calls are disabled by default and are not required for the deterministic onboarding or invoice paths. Invoice processing reads only locally extracted and masked page text; it does not upload source documents to Gemini.
 
 ```bash
 docker compose up --build

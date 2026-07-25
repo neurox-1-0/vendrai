@@ -2,62 +2,68 @@
 
 Status is evidence-based. Allowed values are `NOT_STARTED`, `IMPLEMENTED`, `VERIFIED`, and `BLOCKED`.
 
-Last updated: 2026-07-19
+Last updated: 2026-07-25
 
-## Supplier-onboarding vertical slice
+## Repository truth
 
-| Capability | Status | Evidence / remaining gate |
-|---|---|---|
-| Tenant-scoped case, document, run, event, evidence, approval, notification and ERP schema | VERIFIED | SQLAlchemy metadata compiles; API tests pass. |
-| Reversible pre-release Alembic baseline and role grants | IMPLEMENTED | Upgrade/downgrade and RLS are implemented; PostgreSQL container execution is blocked locally because Docker is unavailable. |
-| Keycloak JWT validation, PKCE web login, RBAC and segregation of duties | IMPLEMENTED | Contract and realm import exist; live Keycloak integration test remains. |
-| PostgreSQL RLS tenant context | IMPLEMENTED | API and workers set transaction-local tenant context; cross-tenant API test passes; live PostgreSQL RLS test remains. |
-| Optimistic case versions and idempotent mutations | VERIFIED | Submission/decision gates and API idempotency tests pass. |
-| Transactional outbox, inbox deduplication and durable case events | IMPLEMENTED | Atomic writes and relay/consumer code exist; RabbitMQ restart/retry/DLQ tests remain. |
-| Tamper-evident append-only audit chain | IMPLEMENTED | Hash chain, advisory serialization lock and database mutation trigger exist; live mutation test remains. |
-| Quarantine upload, magic-byte/size/type checks and ClamAV gate | IMPLEMENTED | Deterministic upload validation tests pass; live ClamAV/S3 tests remain. |
-| Native PDF extraction + Docling/Tesseract/EasyOCR container | IMPLEMENTED | Local born-digital extraction and isolated OCR image are implemented; low-confidence and malicious-document integration fixtures remain. |
-| Local PII protection | IMPLEMENTED | Sensitive values are encrypted, blind-indexed and masked before persisted OCR text; full Presidio/custom-recognizer evaluation remains. |
-| Parent/child policy chunks | VERIFIED | Chunking implementation has passing unit tests. |
-| Dense+sparse Qdrant retrieval, RRF and cross-encoder reranking | IMPLEMENTED | Tenant/ACL/effective-date filters and index/search services exist; model-backed Recall@10 evaluation remains. |
-| Versioned OFAC/UN/EU local sanctions import | IMPLEMENTED | Checksum-gated normalized importer exists; official datasets are not bundled and must be approved/imported. |
-| Deterministic duplicate and sanctions scoring | VERIFIED | Unit tests pass; ≥100-case recall/calibration evaluation remains. |
-| Explicit bounded workflow, evidence verification and HITL pause | VERIFIED | Deterministic graph tests pass and API persists approval interrupts; PostgreSQL LangGraph checkpointer is not yet integrated. |
-| Controlled memory/evaluation schema | IMPLEMENTED | Working checkpoints, approved de-identified episodic records, semantic policy records, procedural prompt/model versions and evaluation results are modeled; memory retrieval/evaluation gates remain. |
-| External LLM privacy gateway | IMPLEMENTED | External calls are off by default and minimized/tokenized payloads are enforced; provider evaluation is not complete. |
-| Evidence-bound mock ERP synchronization | IMPLEMENTED | Idempotent adapter and hard approval gate exist; end-to-end timeout/retry test remains. |
-| Independent in-app/email notifications | IMPLEMENTED | SMTP retries use delayed outbox events and cannot alter case state; outage integration test remains. |
-| Real frontend API integration | VERIFIED | All prior mock arrays/timers were removed; lint, TypeScript and production build pass. |
-| Accessible/responsive operational UX | IMPLEMENTED | Text+icon status chips, mobile navigation, errors, live event/evidence views and stale-decision behavior exist; Playwright accessibility journeys remain. |
-| Production-shaped Compose boundaries | IMPLEMENTED | Services and pinned images are declared; `docker compose up` is blocked locally because Docker is not installed. |
-| CI lint/type/test/audit/secret/container gates | IMPLEMENTED | Workflow exists; it has not run in GitHub yet. |
-| OpenTelemetry collector/redaction | IMPLEMENTED | Collector topology exists; application span instrumentation is still `NOT_STARTED`. |
-| Langfuse v3 optional profile | NOT_STARTED | Intentionally omitted until its ClickHouse/Valkey/blob dependencies are provisioned correctly. |
-| 100-case evaluation suite and required quality thresholds | NOT_STARTED | Required before release. |
-| Backup/restore, load, chaos and security acceptance run | NOT_STARTED | Required before release. |
+The `dev` branch is a production-shaped pre-release implementation, not an enterprise release. The frontend is no longer a static prototype and the invoice path no longer sends raw documents to an external model, but live multi-container, security, quality-evaluation, load, chaos, backup/restore and disaster-recovery acceptance gates remain.
 
-## Invoice Exception Handling vertical slice
+## Shared supplier-onboarding platform
 
 | Capability | Status | Evidence / remaining gate |
 |---|---|---|
-| Domain models and database schema for AP elements | IMPLEMENTED | Models, Alembic migration, and CaseStatus extensions exist; database creation blocked by Docker. |
-| Deterministic 3-way matching and tolerance engine | VERIFIED | Extraction, matching, classifier, and tolerance tools have unit tests. |
-| Invoice LangGraph orchestrator and events worker | IMPLEMENTED | Specialist node, evidence building, and human approval interrupts exist; live worker test remains. |
-| Mock ERP resolution endpoints | IMPLEMENTED | ERP worker syncs exceptions and updates case status; E2E timeout/retry test remains. |
-| Frontend case submission and exception dashboard | IMPLEMENTED | Invoice submission form and detailed line-by-line mismatch dashboard exist; E2E Playwright test remains. |
+| Tenant-scoped case, document, run, event, evidence, approval, notification and ERP schema | IMPLEMENTED | SQLAlchemy models and migrations exist; live RLS and end-to-end service tests remain. |
+| Reversible pre-release Alembic chain | VERIFIED | Fresh PostgreSQL 16 upgrade to head, downgrade to base and re-upgrade to head passed on 2026-07-25. |
+| Least-privilege database roles and tenant RLS context | IMPLEMENTED | API/workers set transaction-local tenant context and migrations define roles/policies; live cross-role PostgreSQL tests remain. |
+| Keycloak JWT validation, PKCE web login, RBAC and segregation of duties | IMPLEMENTED | Realm/client configuration and API permission gates exist; live Keycloak role/tenant tests remain. |
+| Optimistic case versions and idempotent mutations | VERIFIED | API tests cover submission idempotency, stale version checks and evidence-bound decisions. |
+| Transactional outbox, inbox deduplication and durable case events | IMPLEMENTED | Atomic outbox/inbox code exists; live broker restart and duplicate-delivery tests remain. |
+| Isolated RabbitMQ retries and dead-letter queues | IMPLEMENTED | Per-worker quorum queues, tiered TTL retries, publisher confirms, manual acknowledgement and isolated DLQs exist; broker-level failure injection remains. |
+| Tamper-evident append-only audit chain | IMPLEMENTED | Hash chaining and database mutation protection exist; live mutation/recovery tests remain. |
+| Quarantine upload, file validation and ClamAV gate | IMPLEMENTED | Upload validation and local processing code exist; malicious-file, archive-bomb and live S3/ClamAV tests remain. |
+| Native PDF extraction plus Docling/Tesseract/EasyOCR worker | IMPLEMENTED | Isolated document image and native/OCR routing exist; mixed-document confidence evaluation remains. |
+| Local PII masking, encryption and blind indexes | IMPLEMENTED | Sensitive extracted values are encrypted/blind-indexed and persisted text is masked; adversarial leakage evaluation remains. |
+| Parent/child policy chunks | VERIFIED | Structure-aware chunking unit tests pass. |
+| Dense+sparse retrieval, RRF and reranking | IMPLEMENTED | Tenant/ACL/effective-date filters and Qdrant retrieval services exist; Recall@10/citation evaluation remains. |
+| Versioned local sanctions data and deterministic matching | IMPLEMENTED | Importer and matching code exist; approved official data, refresh scheduling and ≥100-case calibration remain. |
+| Explicit supplier workflow, evidence verification and HITL pause | IMPLEMENTED | Deterministic workflow and persisted approval/clarification tasks exist; PostgreSQL LangGraph checkpoint kill/resume remains. |
+| Controlled working, episodic, semantic and procedural memory schema | IMPLEMENTED | Storage models exist; authorization, retention and evaluation of memory retrieval remain. |
+| External LLM privacy gateway | IMPLEMENTED | External use is disabled by default and bounded to allowlisted/tokenized context; provider privacy and leakage tests remain. |
+| Evidence-bound mock ERP synchronization | IMPLEMENTED | Approval/evidence gates and idempotent operations exist; timeout/retry/replay E2E tests remain. |
+| Independent in-app/email notifications | IMPLEMENTED | Notification events retry independently and do not mutate case state; live SMTP outage test remains. |
+| Real frontend API integration | VERIFIED | Mock business arrays/timers were removed; ESLint, TypeScript and production build pass. |
+| Accessible operational UX | IMPLEMENTED | Text+icon status chips, responsive navigation and evidence/progress views exist; Playwright and accessibility acceptance remain. |
+| Production-shaped Compose boundaries | IMPLEMENTED | Web/API/relay/document/agent/invoice/retrieval/notification/ERP services and infrastructure resolve in Compose; full-stack launch is not verified. |
+| CI quality/security gates | IMPLEMENTED | `dev` and `main` run isolated Python tests/type checks, frontend checks, dependency audits, image scan and secret scan; GitHub run remains. |
+| OpenTelemetry | IMPLEMENTED | Collector topology exists; application-level correlated spans and redaction verification remain. |
+| Optional Langfuse v3 profile | NOT_STARTED | Requires ClickHouse, Valkey and blob storage before it can be enabled correctly. |
+| 100-case evaluation and release thresholds | NOT_STARTED | Mandatory before enterprise release. |
+| Backup/restore, load, chaos and security acceptance | NOT_STARTED | Mandatory before enterprise release. |
+
+## Invoice-exception recovery slice
+
+| Capability | Status | Evidence / remaining gate |
+|---|---|---|
+| AP domain models and reversible schema | VERIFIED | Decimal-backed PO/GRN/invoice/exception models are present and the PostgreSQL migration cycle passes. |
+| Draft/upload/submit API with RBAC and idempotency | VERIFIED | API tests prove one draft case is reused through upload and submission and unauthorized auditors are rejected. |
+| Privacy-first local invoice extraction | IMPLEMENTED | Worker consumes only masked `DocumentPage` text, rejects ambiguous/incomplete documents and contains no raw Gemini file upload; adversarial leakage E2E remains. |
+| Deterministic PO/GRN matching, duplicate, bank and tax checks | IMPLEMENTED | Signed Decimal variance, mandatory GRN/PO evidence, tenant/vendor duplicate lookup and blind-index bank comparison have unit coverage; representative evaluation remains. |
+| Policy-grounded evidence packet and fail-closed verification | IMPLEMENTED | Canonical tamper-sensitive evidence hashes and policy citations are required; live retrieval outage/publication tests remain. |
+| Durable approval, clarification and escalation | IMPLEMENTED | Evidence/version-bound HITL, explicit duplicate/HOLD states and fresh admin escalation tasks exist; worker kill/resume and full UI journey remain. |
+| Invoice LangGraph PostgreSQL checkpointer | NOT_STARTED | The unused hard-coded mock graph was removed. The current invoice workflow is durable through DB state/outbox but is not yet a LangGraph checkpointed graph. |
+| Mock ERP invoice resolution | IMPLEMENTED | Resolution is idempotent, evidence-gated and writes invoice history after confirmation; live timeout/retry E2E remains. |
+| Real invoice frontend and SSE progress | VERIFIED | UI creates a real invoice draft, uploads documents to that case, submits it and consumes durable run events; lint/type/build pass. |
 
 ## Latest local verification
 
-- API: `7 passed`.
-- Agent intelligence: `4 passed`.
-- Python compilation: passed.
-- Python mypy gate: passed.
-- Frontend ESLint: passed.
-- Frontend TypeScript: passed.
-- Frontend production build: passed.
-- Python dependency audits (API, OCR and retrieval images): no known vulnerabilities.
-- npm audit: no known vulnerabilities.
-- Compose YAML parse: passed.
-- Full container launch: `BLOCKED`—Docker is not installed in the current environment.
+- API tests: `18 passed`.
+- Agent intelligence tests: `4 passed`.
+- Ruff, Python compilation and both isolated mypy gates: passed.
+- Frontend ESLint, TypeScript and Next.js 16.2.11 production build: passed.
+- npm production dependency audit: `0 vulnerabilities`.
+- PostgreSQL 16 migration upgrade/downgrade/re-upgrade: passed.
+- Compose configuration resolution: passed.
+- Full service stack, Keycloak, RabbitMQ failure paths, ClamAV, Qdrant, SMTP and ERP E2E: not run.
+- Python dependency audit, container scan and GitHub CI: not rerun in this local pass.
 
-This repository is now a production-shaped vertical slice, not a finished enterprise release. `IMPLEMENTED` must not be read as `VERIFIED` until its stated acceptance test passes.
+`IMPLEMENTED` must not be read as `VERIFIED`; only the acceptance evidence named in this file can move a capability to `VERIFIED`.

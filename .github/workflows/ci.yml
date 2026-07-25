@@ -3,7 +3,7 @@ name: NeuroX CI
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, dev]
 
 permissions:
   contents: read
@@ -22,8 +22,18 @@ jobs:
             services/agent/requirements.txt
       - run: pip install -r services/api/requirements.txt -r services/agent/requirements.txt ruff mypy pip-audit
       - run: ruff check services/api services/agent services/mock_erp
-      - run: mypy --ignore-missing-imports services/api/app/domain services/agent/app
-      - run: pytest -q services/api/tests services/agent/tests
+      - name: API type check
+        working-directory: services/api
+        run: mypy --ignore-missing-imports app/domain
+      - name: Agent type check
+        working-directory: services/agent
+        run: mypy --ignore-missing-imports app
+      - name: API tests
+        working-directory: services/api
+        run: pytest -q
+      - name: Agent tests
+        working-directory: services/agent
+        run: pytest -q
       - run: pip-audit -r services/api/requirements.txt
       - run: pip-audit -r services/api/requirements-document.txt
       - run: pip-audit -r services/api/requirements-retrieval.txt
