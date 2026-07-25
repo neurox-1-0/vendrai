@@ -3,13 +3,25 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Index, Integer, LargeBinary, Numeric, String, Text, UniqueConstraint, func
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    LargeBinary,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import JSON, Uuid
 
 from app.database import Base
-
 
 JSONType = JSON().with_variant(JSONB(), "postgresql")
 
@@ -178,6 +190,33 @@ class InboxReceipt(Base):
     processed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class IdempotencyRecord(Base):
+    __tablename__ = "idempotency_records"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "scope", "key_hash"),
+        Index("ix_idempotency_expiry", "expires_at"),
+    )
+    idempotency_record_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tenants.tenant_id"),
+        index=True,
+    )
+    actor_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.user_id"))
+    scope: Mapped[str] = mapped_column(String(100))
+    key_hash: Mapped[str] = mapped_column(String(64))
+    request_hash: Mapped[str] = mapped_column(String(64))
+    resource_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+
+
 class AgentRun(Base, TimestampMixin):
     __tablename__ = "agent_runs"
     run_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
@@ -210,21 +249,6 @@ class AgentStep(Base):
     output_summary: Mapped[dict[str, Any]] = mapped_column(JSONType, default=dict)
     error: Mapped[dict[str, Any]] = mapped_column(JSONType, default=dict)
     latency_ms: Mapped[int | None]
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-
-
-class GraphCheckpoint(Base):
-    __tablename__ = "graph_checkpoints"
-    __table_args__ = (UniqueConstraint("tenant_id", "thread_id", "checkpoint_namespace", "checkpoint_id"),)
-    graph_checkpoint_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
-    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.tenant_id"), index=True)
-    run_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("agent_runs.run_id", ondelete="CASCADE"), index=True)
-    thread_id: Mapped[str] = mapped_column(String(180), index=True)
-    checkpoint_namespace: Mapped[str] = mapped_column(String(120), default="")
-    checkpoint_id: Mapped[str] = mapped_column(String(180))
-    parent_checkpoint_id: Mapped[str | None] = mapped_column(String(180))
-    state_json: Mapped[dict[str, Any]] = mapped_column(JSONType, default=dict)
-    metadata_json: Mapped[dict[str, Any]] = mapped_column("metadata", JSONType, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -379,6 +403,32 @@ class AuditLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class AuditExport(Base):
+    __tablename__ = "audit_exports"
+    audit_export_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tenants.tenant_id"),
+        index=True,
+    )
+    case_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("cases.case_id", ondelete="CASCADE"),
+        index=True,
+    )
+    requested_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.user_id"))
+    storage_key: Mapped[str] = mapped_column(Text)
+    sha256: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(30), default="READY")
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+
+
 class PolicyDocument(Base, TimestampMixin):
     __tablename__ = "policy_documents"
     __table_args__ = (UniqueConstraint("tenant_id", "policy_code"),)
@@ -427,6 +477,32 @@ class SanctionsDataset(Base, TimestampMixin):
     sha256: Mapped[str] = mapped_column(String(64))
     status: Mapped[str] = mapped_column(String(30), default="STAGED")
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class SanctionsImport(Base, TimestampMixin):
+    __tablename__ = "sanctions_imports"
+    sanctions_import_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tenants.tenant_id"),
+        index=True,
+    )
+    source: Mapped[str] = mapped_column(String(20))
+    source_url: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(30), default="QUEUED")
+    requested_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.user_id"))
+    dataset_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("sanctions_datasets.dataset_id")
+    )
+    etag: Mapped[str | None] = mapped_column(Text)
+    sha256: Mapped[str | None] = mapped_column(String(64))
+    entity_count: Mapped[int | None] = mapped_column(Integer)
+    error_code: Mapped[str | None] = mapped_column(String(80))
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class SanctionsEntityRecord(Base):

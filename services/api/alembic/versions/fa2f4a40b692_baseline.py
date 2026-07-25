@@ -7,9 +7,8 @@ Revises:
 from collections.abc import Sequence
 
 from alembic import op
-
-from app.database import Base
 from app import models  # noqa: F401 - registers mappings
+from app.database import Base
 
 revision: str = "fa2f4a40b692"
 down_revision: str | None = None
@@ -20,7 +19,7 @@ depends_on: str | Sequence[str] | None = None
 TENANT_TABLES = (
     "users", "vendors", "cases", "documents", "document_pages", "extracted_fields",
     "case_events", "outbox_events", "agent_runs", "agent_steps", "evidence_items",
-    "graph_checkpoints", "episodic_memories", "prompt_versions", "model_versions",
+    "episodic_memories", "prompt_versions", "model_versions",
     "evaluation_datasets", "evaluation_results",
     "approval_tasks", "approval_decisions", "notifications", "notification_deliveries", "audit_logs",
     "policy_documents", "policy_versions", "policy_chunks", "duplicate_candidates", "risk_checks",

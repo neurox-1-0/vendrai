@@ -1,6 +1,7 @@
 from app.domain.invoices import check_tolerance
 from app.workers.invoice_agent import check_missing_po, check_tax_mismatch
 
+
 def test_tolerance_logic():
     # Within tolerance (<= 50.0 LKR AND <= 5%)
     assert check_tolerance(variance_amount=25.0, variance_pct=2.5, threshold_amount=50.0, threshold_pct=5.0) is True

@@ -3,6 +3,7 @@ from datetime import date
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
 
+from app.observability import configure_observability
 from app.retrieval import hybrid_search
 
 
@@ -15,6 +16,7 @@ class SearchRequest(BaseModel):
 
 
 app = FastAPI(title="NeuroX tenant-filtered policy retrieval", docs_url=None)
+configure_observability(app, service_name="neurox-retrieval-api")
 
 
 @app.get("/health")
@@ -26,4 +28,3 @@ async def health():
 async def search(body: SearchRequest):
     items = hybrid_search(body.query, body.tenant_id, body.roles, body.effective_date, body.limit)
     return {"status": "SUCCESS" if items else "INSUFFICIENT_EVIDENCE", "items": items}
-

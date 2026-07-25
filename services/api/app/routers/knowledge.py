@@ -14,7 +14,6 @@ from app.models import PolicyChunk, PolicyDocument, PolicyVersion
 from app.schemas import PolicyResponse, PolicyUploadRequest
 from app.services.events import append_audit, enqueue_event
 
-
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 Db = Annotated[AsyncSession, Depends(get_db)]
 

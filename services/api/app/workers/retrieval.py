@@ -1,12 +1,11 @@
 import asyncio
 import uuid
 
-from sqlalchemy import select
-
 from app.models import InboxReceipt, PolicyChunk, PolicyDocument, PolicyVersion
 from app.retrieval import index_chunks
 from app.workers.common import consume
 from app.workers.database import WorkerSession, set_worker_tenant
+from sqlalchemy import select
 
 
 async def index_policy(envelope: dict) -> None:

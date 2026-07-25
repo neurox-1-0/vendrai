@@ -6,13 +6,13 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import CurrentPrincipal, Principal
+from app.auth import CASE_READ_ROLES, CurrentPrincipal, Principal
 from app.database import get_db
 from app.domain.cases import CaseStatus, InvalidTransition, assert_transition
 from app.models import AgentRun, ApprovalTask, Case, Document, OutboxEvent
+from app.routers.approvals import CONTROL_REVIEW_TASKS
 from app.schemas import ActionAccepted, CaseCreate, CaseListResponse, CaseResponse
 from app.services.events import append_audit, append_case_event, enqueue_event
-
 
 router = APIRouter(prefix="/cases", tags=["cases"])
 Db = Annotated[AsyncSession, Depends(get_db)]
@@ -25,7 +25,11 @@ async def _tenant_case(db: AsyncSession, principal: Principal, case_id: uuid.UUI
     if for_update:
         statement = statement.with_for_update()
     case = (await db.execute(statement)).scalar_one_or_none()
-    if not case:
+    if (
+        not case
+        or principal.is_requester_only
+        and case.requester_user_id != principal.user_id
+    ):
         raise HTTPException(404, detail={"code": "CASE_NOT_FOUND"})
     return case
 
@@ -78,11 +82,11 @@ async def list_cases(
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ):
-    principal.require_any("requester", "analyst", "approver", "auditor", "admin")
+    principal.require_any(*CASE_READ_ROLES)
     filters = [Case.tenant_id == principal.tenant_id]
     if case_status:
         filters.append(Case.status == case_status)
-    if principal.roles == {"requester"}:
+    if principal.is_requester_only:
         filters.append(Case.requester_user_id == principal.user_id)
     total = await db.scalar(select(func.count()).select_from(Case).where(*filters))
     items = (
@@ -93,10 +97,169 @@ async def list_cases(
 
 @router.get("/{case_id}", response_model=CaseResponse)
 async def get_case(case_id: uuid.UUID, db: Db, principal: CurrentPrincipal):
-    principal.require_any("requester", "analyst", "approver", "auditor", "admin")
+    principal.require_any(*CASE_READ_ROLES)
     case = await _tenant_case(db, principal, case_id)
-    if principal.roles == {"requester"} and case.requester_user_id != principal.user_id:
+    if principal.is_requester_only and case.requester_user_id != principal.user_id:
         raise HTTPException(404, detail={"code": "CASE_NOT_FOUND"})
+    return case
+
+
+@router.post("/{case_id}:claim", response_model=CaseResponse)
+async def claim_case(
+    case_id: uuid.UUID,
+    db: Db,
+    principal: CurrentPrincipal,
+    idempotency_key: IdempotencyKey,
+    expected_version: ExpectedVersion,
+):
+    principal.require_any(
+        "analyst",
+        "approver",
+        "procurement_approver",
+        "compliance_approver",
+        "finance_approver",
+        "admin",
+    )
+    case = await _tenant_case(db, principal, case_id, for_update=True)
+    scoped_key = f"case.claim:{case_id}:{idempotency_key}"
+    if await db.scalar(
+        select(OutboxEvent).where(
+            OutboxEvent.tenant_id == principal.tenant_id,
+            OutboxEvent.idempotency_key == scoped_key,
+        )
+    ):
+        return case
+    if case.current_version != expected_version:
+        raise HTTPException(
+            409,
+            detail={
+                "code": "STALE_CASE_VERSION",
+                "current_version": case.current_version,
+            },
+        )
+    if (
+        case.assigned_user_id
+        and case.assigned_user_id != principal.user_id
+        and "admin" not in principal.roles
+    ):
+        raise HTTPException(
+            409,
+            detail={
+                "code": "CASE_ALREADY_CLAIMED",
+                "assigned_user_id": str(case.assigned_user_id),
+            },
+        )
+    case.assigned_user_id = principal.user_id
+    case.current_version += 1
+    enqueue_event(
+        db,
+        tenant_id=principal.tenant_id,
+        aggregate_type="case",
+        aggregate_id=case_id,
+        aggregate_version=case.current_version,
+        event_type="case.claimed.v1",
+        idempotency_key=scoped_key,
+        payload={
+            "case_id": str(case_id),
+            "assigned_user_id": str(principal.user_id),
+        },
+    )
+    await append_case_event(
+        db,
+        tenant_id=principal.tenant_id,
+        case_id=case_id,
+        event_type="CASE_CLAIMED",
+        actor_type="USER",
+        actor_id=str(principal.user_id),
+        payload={"assigned_user_id": str(principal.user_id)},
+    )
+    await append_audit(
+        db,
+        tenant_id=principal.tenant_id,
+        case_id=case_id,
+        actor_type="USER",
+        actor_id=str(principal.user_id),
+        action="CASE_CLAIMED",
+        resource_type="CASE",
+        resource_id=str(case_id),
+        metadata={"version": case.current_version},
+    )
+    return case
+
+
+@router.post("/{case_id}:release", response_model=CaseResponse)
+async def release_case(
+    case_id: uuid.UUID,
+    db: Db,
+    principal: CurrentPrincipal,
+    idempotency_key: IdempotencyKey,
+    expected_version: ExpectedVersion,
+):
+    principal.require_any(
+        "analyst",
+        "approver",
+        "procurement_approver",
+        "compliance_approver",
+        "finance_approver",
+        "admin",
+    )
+    case = await _tenant_case(db, principal, case_id, for_update=True)
+    scoped_key = f"case.release:{case_id}:{idempotency_key}"
+    if await db.scalar(
+        select(OutboxEvent).where(
+            OutboxEvent.tenant_id == principal.tenant_id,
+            OutboxEvent.idempotency_key == scoped_key,
+        )
+    ):
+        return case
+    if case.current_version != expected_version:
+        raise HTTPException(
+            409,
+            detail={
+                "code": "STALE_CASE_VERSION",
+                "current_version": case.current_version,
+            },
+        )
+    if not case.assigned_user_id:
+        return case
+    if (
+        case.assigned_user_id != principal.user_id
+        and "admin" not in principal.roles
+    ):
+        raise HTTPException(403, detail={"code": "CASE_OWNER_REQUIRED"})
+    previous_owner = case.assigned_user_id
+    case.assigned_user_id = None
+    case.current_version += 1
+    enqueue_event(
+        db,
+        tenant_id=principal.tenant_id,
+        aggregate_type="case",
+        aggregate_id=case_id,
+        aggregate_version=case.current_version,
+        event_type="case.released.v1",
+        idempotency_key=scoped_key,
+        payload={"case_id": str(case_id)},
+    )
+    await append_case_event(
+        db,
+        tenant_id=principal.tenant_id,
+        case_id=case_id,
+        event_type="CASE_RELEASED",
+        actor_type="USER",
+        actor_id=str(principal.user_id),
+        payload={"previous_owner": str(previous_owner)},
+    )
+    await append_audit(
+        db,
+        tenant_id=principal.tenant_id,
+        case_id=case_id,
+        actor_type="USER",
+        actor_id=str(principal.user_id),
+        action="CASE_RELEASED",
+        resource_type="CASE",
+        resource_id=str(case_id),
+        metadata={"version": case.current_version},
+    )
     return case
 
 
@@ -125,8 +288,12 @@ async def submit_case(case_id: uuid.UUID, db: Db, principal: CurrentPrincipal, i
     case.status = CaseStatus.SUBMITTED
     case.current_version += 1
     case.submitted_at = datetime.now(UTC)
+    run_id = uuid.uuid4()
     run = AgentRun(
-        tenant_id=principal.tenant_id, case_id=case.case_id, thread_id=f"case:{case.case_id}:v{case.current_version}",
+        run_id=run_id,
+        tenant_id=principal.tenant_id,
+        case_id=case.case_id,
+        thread_id=f"{principal.tenant_id}:supplier:{case.case_id}:{run_id}",
         graph_name="invoice_exception" if case.case_type == "INVOICE_EXCEPTION" else "vendor_onboarding",
         status="QUEUED", current_node="document_processing", state_json={"case_id": str(case.case_id)},
     )
@@ -184,7 +351,9 @@ async def retry_erp(case_id: uuid.UUID, db: Db, principal: CurrentPrincipal, ide
     if case.status != CaseStatus.ERP_SYNC_FAILED:
         raise HTTPException(409, detail={"code": "ERP_RETRY_NOT_ALLOWED", "status": case.status})
     task = await db.scalar(select(ApprovalTask).where(
-        ApprovalTask.case_id == case_id, ApprovalTask.status == "APPROVED",
+        ApprovalTask.case_id == case_id,
+        ApprovalTask.status == "APPROVED",
+        ApprovalTask.task_type.notin_(CONTROL_REVIEW_TASKS),
     ).order_by(ApprovalTask.completed_at.desc()))
     if not task:
         raise HTTPException(409, detail={"code": "APPROVED_TASK_REQUIRED"})
@@ -193,9 +362,19 @@ async def retry_erp(case_id: uuid.UUID, db: Db, principal: CurrentPrincipal, ide
     case.current_version += 1
     enqueue_event(
         db, tenant_id=principal.tenant_id, aggregate_type="case", aggregate_id=case_id,
-        aggregate_version=case.current_version, event_type="erp.sync.requested.v1",
+        aggregate_version=case.current_version,
+        event_type=(
+            "invoice.resolution.approved.v1"
+            if case.case_type == "INVOICE_EXCEPTION"
+            else "erp.sync.requested.v1"
+        ),
         idempotency_key=f"erp.retry:{case_id}:{idempotency_key}",
-        payload={"case_id": str(case_id), "approval_task_id": str(task.approval_task_id), "evidence_hash": task.evidence_hash},
+        payload={
+            "case_id": str(case_id),
+            "run_id": str(task.run_id),
+            "approval_task_id": str(task.approval_task_id),
+            "evidence_hash": task.evidence_hash,
+        },
     )
     await append_case_event(db, tenant_id=principal.tenant_id, case_id=case_id, event_type="ERP_SYNC_RETRY_QUEUED", actor_type="USER", actor_id=str(principal.user_id), payload={})
     await append_audit(

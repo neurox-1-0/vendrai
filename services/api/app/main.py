@@ -2,7 +2,7 @@ import time
 import uuid
 from datetime import UTC, datetime
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -10,8 +10,23 @@ from sqlalchemy import text
 
 from app.config import settings
 from app.database import engine
-from app.routers import approvals, cases, clarifications, documents, evidence, invoices, knowledge, notifications, runs
-
+from app.observability import configure_observability
+from app.routers import (
+    admin,
+    approvals,
+    audit_exports,
+    cases,
+    clarifications,
+    documents,
+    evidence,
+    invoices,
+    knowledge,
+    notifications,
+    reviews,
+    runs,
+    work_queue,
+)
+from app.services.rate_limit import enforce_rate_limit
 
 app = FastAPI(
     title="NeuroX Vendor Onboarding API",
@@ -24,12 +39,18 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[origin.strip() for origin in settings.CORS_ORIGINS.split(",") if origin.strip()],
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "Idempotency-Key", "If-Match", "Last-Event-ID", "X-Dev-Tenant-Id", "X-Dev-User-Id", "X-Dev-Roles"],
 )
 
-for router in (cases.router, documents.router, runs.router, approvals.router, evidence.router, notifications.router, knowledge.router, clarifications.router, invoices.router):
-    app.include_router(router, prefix=settings.API_PREFIX)
+for router in (cases.router, documents.router, runs.router, approvals.router, reviews.router, work_queue.router, evidence.router, audit_exports.router, notifications.router, knowledge.router, clarifications.router, invoices.router, admin.router):
+    app.include_router(
+        router,
+        prefix=settings.API_PREFIX,
+        dependencies=[Depends(enforce_rate_limit)],
+    )
+
+configure_observability(app)
 
 
 @app.middleware("http")

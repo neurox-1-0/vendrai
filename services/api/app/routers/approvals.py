@@ -13,20 +13,40 @@ from app.models import ApprovalDecision, ApprovalTask, Case, Notification, Outbo
 from app.schemas import ApprovalDecisionRequest, ApprovalTaskResponse
 from app.services.events import append_audit, append_case_event, enqueue_event
 
-
 router = APIRouter(prefix="/approval-tasks", tags=["approvals"])
 Db = Annotated[AsyncSession, Depends(get_db)]
+CONTROL_REVIEW_TASKS = {
+    "SANCTIONS_REVIEW",
+    "BANK_CHANGE_REVIEW",
+    "TAX_REVIEW",
+    "PROCUREMENT_REVIEW",
+    "DUPLICATE_REVIEW",
+}
 
 
 @router.get("", response_model=list[ApprovalTaskResponse])
 async def list_approval_tasks(db: Db, principal: CurrentPrincipal, task_status: str = "PENDING"):
-    principal.require_any("approver", "analyst", "auditor", "admin")
-    tasks = (await db.execute(
-        select(ApprovalTask).where(
+    principal.require_any(
+        "approver",
+        "procurement_approver",
+        "compliance_approver",
+        "finance_approver",
+        "analyst",
+        "auditor",
+        "admin",
+    )
+    statement = select(ApprovalTask).where(
             ApprovalTask.tenant_id == principal.tenant_id,
             ApprovalTask.status == task_status,
-        ).order_by(ApprovalTask.created_at)
-    )).scalars().all()
+            ApprovalTask.task_type.notin_(CONTROL_REVIEW_TASKS),
+        )
+    if not principal.roles.intersection({"analyst", "auditor", "admin"}):
+        statement = statement.where(
+            ApprovalTask.assigned_role.in_(principal.roles)
+        )
+    tasks = (
+        await db.execute(statement.order_by(ApprovalTask.created_at))
+    ).scalars().all()
     return list(tasks)
 
 
@@ -61,13 +81,11 @@ async def decide_approval(
         raise HTTPException(409, detail={"code": "STALE_APPROVAL", "current_version": case.current_version})
     if body.evidence_hash != task.evidence_hash:
         raise HTTPException(409, detail={"code": "EVIDENCE_CHANGED"})
-    invoice_override_tasks = {
-        "INVOICE_EXCEPTION_RESOLUTION",
-        "TAX_REVIEW",
-        "PROCUREMENT_REVIEW",
-        "DUPLICATE_REVIEW",
-    }
-    if body.decision == "APPROVED" and task.task_type in invoice_override_tasks and not body.comment:
+    if (
+        body.decision == "APPROVED"
+        and task.task_type in CONTROL_REVIEW_TASKS
+        and not body.comment
+    ):
         raise HTTPException(422, detail={"code": "OVERRIDE_COMMENT_REQUIRED"})
 
     decision = ApprovalDecision(
@@ -79,34 +97,26 @@ async def decide_approval(
     task.status = body.decision
     task.completed_at = datetime.now(UTC)
     if body.decision == "APPROVED":
-        assert_transition(case.status, CaseStatus.APPROVED)
-        case.status = CaseStatus.APPROVED
-        event_type = "approval.approved.v1"
-        if task.task_type in ("INVOICE_EXCEPTION_RESOLUTION", "TAX_REVIEW", "PROCUREMENT_REVIEW", "INVOICE_AP_APPROVAL", "DUPLICATE_REVIEW"):
-            next_event = "invoice.resolution.approved.v1"
+        if task.task_type in CONTROL_REVIEW_TASKS:
+            event_type = "review.resolved.v1"
         else:
-            next_event = "erp.sync.requested.v1"
-        next_status = CaseStatus.ERP_SYNC_PENDING
+            assert_transition(case.status, CaseStatus.APPROVED)
+            case.status = CaseStatus.APPROVED
+            event_type = "approval.approved.v1"
     elif body.decision == "REJECTED":
         assert_transition(case.status, CaseStatus.REJECTED)
         case.status = CaseStatus.REJECTED
         case.resolved_at = datetime.now(UTC)
         event_type = "approval.rejected.v1"
-        next_event = None
-        next_status = None
     elif body.decision == "MORE_INFO":
         assert_transition(case.status, CaseStatus.NEEDS_CLARIFICATION)
         case.status = CaseStatus.NEEDS_CLARIFICATION
         event_type = "approval.more_info.v1"
-        next_event = None
-        next_status = None
     else:
         # Escalation closes this decision task but deliberately leaves the case
         # in its current safety state. A fresh admin task keeps the workflow
         # actionable without inventing an invalid state transition.
         event_type = "approval.escalated.v1"
-        next_event = None
-        next_status = None
     case.current_version += 1
     if body.decision == "ESCALATED":
         db.add(
@@ -131,22 +141,16 @@ async def decide_approval(
     enqueue_event(
         db, tenant_id=principal.tenant_id, aggregate_type="case", aggregate_id=case.case_id,
         aggregate_version=case.current_version, event_type=event_type, idempotency_key=scoped_key,
-        payload={"case_id": str(case.case_id), "task_id": str(task_id), "decision": body.decision},
+        payload={
+            "case_id": str(case.case_id),
+            "run_id": str(task.run_id),
+            "task_id": str(task_id),
+            "decision": body.decision,
+            "evidence_hash": body.evidence_hash,
+            "expected_version": body.expected_version,
+            "actor_id": str(principal.user_id),
+        },
     )
-    if next_event and next_status:
-        assert_transition(case.status, next_status)
-        case.status = next_status
-        case.current_version += 1
-        enqueue_event(
-            db, tenant_id=principal.tenant_id, aggregate_type="case", aggregate_id=case.case_id,
-            aggregate_version=case.current_version, event_type=next_event,
-            idempotency_key=f"erp.request:{task_id}:{body.evidence_hash}",
-            payload={"case_id": str(case.case_id), "approval_task_id": str(task_id), "evidence_hash": body.evidence_hash},
-        )
-        await append_case_event(
-            db, tenant_id=principal.tenant_id, case_id=case.case_id, event_type="ERP_SYNC_QUEUED",
-            actor_type="SYSTEM", actor_id="approval-service", payload={"status": case.status},
-        )
     await append_audit(
         db, tenant_id=principal.tenant_id, case_id=case.case_id, actor_type="USER", actor_id=str(principal.user_id),
         action="APPROVAL_DECIDED", resource_type="APPROVAL_TASK", resource_id=str(task_id),

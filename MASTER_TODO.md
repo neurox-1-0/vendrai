@@ -1,57 +1,86 @@
 # NeuroX master acceptance TODO
 
-Only acceptance-test-backed work may move to `VERIFIED` in `CURRENT_STATUS.md`.
+Only acceptance-test-backed work may move to `VERIFIED` in
+`CURRENT_STATUS.md`.
 
-## Completed recovery work
+## Implemented on `feature/p0-p1-enterprise-e2e`
 
-- [x] Fast-forward local `dev` to the Vendrai `dev` history without modifying the untracked procurement corpus.
-- [x] Repair the duplicate invoice-history RLS migration and verify PostgreSQL 16 upgrade/downgrade/re-upgrade.
-- [x] Run CI on both `main` and `dev` with isolated API/agent import boundaries.
-- [x] Remove raw invoice-document upload to Gemini and delete the unused hard-coded invoice graph/tools.
-- [x] Replace the dummy invoice case/timer UI with one real draft/upload/submit case flow and durable SSE.
-- [x] Add server-side invoice RBAC, idempotency, optimistic versions and evidence-bound approval controls.
-- [x] Add local fail-closed extraction, Decimal matching, authoritative PO/GRN lookup, duplicate checks, blind-index bank comparison and policy evidence gating.
-- [x] Replace placeholder evidence hashes with canonical tamper-sensitive hashes.
-- [x] Add explicit duplicate/HOLD approval paths and safe escalation to a new admin task.
-- [x] Add per-worker quorum retry queues, publisher confirms, manual acknowledgements and isolated dead-letter queues.
-- [x] Upgrade frontend dependencies and clear the production npm audit.
+- [x] Rebuild the P0/P1 database model and reversible migration chain.
+- [x] Add least-privilege database roles, transaction tenant context and RLS.
+- [x] Add Keycloak PKCE/RBAC and secret-driven synthetic acceptance users.
+- [x] Add MinIO quarantine/private buckets, presigned uploads and ClamAV gating.
+- [x] Add per-page native/Docling/Tesseract/EasyOCR routing and local PII masking.
+- [x] Add parent/child policy ingestion, dense+sparse retrieval, RRF and reranking.
+- [x] Add versioned OFAC/UN/EU adapters with provenance and stale-list blocking.
+- [x] Consolidate supplier and invoice execution into durable PostgreSQL-backed LangGraphs.
+- [x] Add real Gemini structured contradiction, clarification and evidence critique.
+- [x] Add deterministic duplicate, sanctions, PO/GRN, policy and evidence controls.
+- [x] Put OPA in the ERP authorization path and fail closed on stale evidence,
+  unresolved controls, unsafe state or segregation-of-duties failure.
+- [x] Add clarification, control review, final approval and ERP confirmation interrupts.
+- [x] Add idempotent mock ERP and independent durable notification retries.
+- [x] Add versioned event contracts, outbox/inbox reliability and durable SSE replay.
+- [x] Add generated OpenAPI/Orval contracts and drift gates.
+- [x] Replace mock frontend data with real work queues, documents, corrections,
+  clarifications, reviews, evidence, notifications and admin integration health.
+- [x] Add correlated OpenTelemetry, Tempo/Prometheus/Grafana configuration and source redaction.
+- [x] Add pgBackRest/WAL object-storage backup configuration and restore runbook.
+- [x] Add a reproducible 100-case synthetic evaluation manifest.
+- [x] Add CI gates for lint, typing, tests, migrations, live RLS/checkpoints,
+  contracts, dependency audits, SBOM, image scan and secret scan.
 
-## P0 — enterprise release blockers
+## P0 — acceptance blockers before PR to `dev`
 
-- [ ] Launch the complete Compose profile and run a clean supplier-onboarding plus invoice-exception journey.
-- [ ] Add live RLS tests using non-superuser API, worker, relay and audit roles.
-- [ ] Add Keycloak token/role/tenant tests and a production user-provisioning runbook.
-- [ ] Persist supplier and invoice LangGraph checkpoints in PostgreSQL; test worker kill/resume at clarification and approval interrupts.
-- [ ] Add approved official OFAC, UN and EU adapters, provenance checks, refresh scheduling and stale-list blocking.
-- [ ] Build at least 100 synthetic/anonymized evaluation cases and enforce every numerical extraction, retrieval, duplicate, citation and privacy gate.
-- [ ] Generate contract tests from OpenAPI and versioned event JSON Schemas.
-- [ ] Add Playwright journeys for clean onboarding, duplicate review, sanctions candidate, missing document, OCR correction, rejection, escalation, stale approval, cancellation and ERP retry.
-- [ ] Add security fixtures for cross-tenant API/Qdrant access, malicious PDFs, prompt injection, PII leakage, SQL injection, forged/replayed approvals, expired upload URLs, unauthorized tools and audit mutation.
-- [ ] Verify RabbitMQ retry/DLQ behavior under broker restart, worker death, poison messages and duplicate delivery.
-- [ ] Verify notification/SMTP failure never changes or blocks case progression.
-- [ ] Verify ERP timeout/replay idempotency and require explicit confirmation before completion.
-- [ ] Run Python dependency audit, secret scan, image scan/SBOM and signed provenance in CI.
-- [ ] Add backup/restore acceptance, failure injection, load profile and recovery runbooks.
+- [ ] Owner: free at least 45–50 GB on the workstation, or explicitly authorize a
+  narrowly scoped Docker cleanup. Current free space is approximately 3.5 GB.
+- [ ] Launch `docker compose --profile acceptance up --build` with fresh volumes.
+- [ ] Pull the pinned OPA image, run `opa check`, and exercise allow/deny/outage
+  decisions; the current Docker registry CDN DNS lookup failed.
+- [ ] Run clean supplier onboarding and invoice exception journeys with real Gemini.
+- [ ] Verify Keycloak tokens, roles, tenant claims, PKCE and segregation of duties.
+- [ ] Verify MinIO presigned expiry, tenant object isolation, ClamAV malicious files
+  and archive-bomb/page/size rejection.
+- [ ] Verify RabbitMQ broker restart, worker death, duplicate events, poison
+  messages, retry tiers and DLQs.
+- [ ] Kill/restart workers at clarification, control-review, approval and ERP
+  confirmation interrupts and prove no successful step repeats.
+- [ ] Configure an approved official EU sanctions export and run live OFAC/UN/EU refresh.
+- [ ] Publish the two synthetic policy PDFs and run live Qdrant tenant/ACL/date tests.
+- [ ] Materialize and execute 50 supplier plus 50 invoice cases through real services.
+- [ ] Enforce extraction F1, duplicate recall, exact identifier, Recall@10,
+  citation precision, tenant isolation, ERP authorization and PII leakage thresholds.
+- [ ] Run Playwright journeys VO-001–VO-005 and AP-001–AP-007 with accessibility checks.
+- [ ] Run malicious PDF, prompt injection, SQL injection, forged/replayed decision,
+  expired URL, unauthorized tool and audit-mutation security tests.
+- [ ] Run Gemini invalid key, quota, 429, invalid schema and outage recovery tests.
+- [ ] Run SMTP outage and ERP timeout/replay acceptance.
+- [ ] Run 10-concurrent-workflow latency/load profile.
+- [ ] Perform encrypted pgBackRest backup and isolated restore; record measured RPO/RTO.
+- [ ] Run the branch CI on GitHub and resolve every audit/scan/build result.
+- [ ] Open a PR from `feature/p0-p1-enterprise-e2e` into `dev` only after all gates above are green.
 
-## P1 — complete the vertical slices
+## P1 — operational completion gates
 
-- [ ] Add document-page rendering and authorized object-download endpoints with bounding-box overlays and field-correction UI.
-- [ ] Generate and version the frontend client from OpenAPI; fail CI when generated contracts drift.
-- [ ] Add Presidio custom financial/vendor recognizers and measure leakage on adversarial fixtures.
-- [ ] Add mixed born-digital/scanned PDF page routing and calibrated OCR confidence thresholds.
-- [ ] Add application OpenTelemetry spans across request, outbox, broker, worker, retrieval, LLM, object storage and ERP boundaries.
-- [ ] Add clarification-task UI and durable response/resume journey.
-- [ ] Add duplicate comparison and sanctions-resolution interfaces with dual-control disposition.
-- [ ] Add role-specific ownership, SLA filters and saved work-queue views.
-- [ ] Add authorized audit export rather than browser-only case summaries.
-- [ ] Add Redis rate limiting/cache namespaces and verify tenant-key isolation.
-- [ ] Replace local shared-volume object storage with S3-compatible presigned upload/download adapters; retain local storage only for developer mode.
-- [ ] Consume human-confirmed invoice extraction corrections during resumed analysis.
-- [ ] Require authoritative ERP/API PO and GRN data in production; keep uploaded reference documents visibly non-authoritative.
+- [ ] Validate bounding-box highlights and corrected-field resume in real browser journeys.
+- [ ] Validate saved queue filters, claiming/releasing and SLA status behavior across roles.
+- [ ] Validate audit export authorization, expiry and downloaded hash.
+- [ ] Inspect live traces end to end and prove no PII, prompt, signed URL or SQL leakage.
+- [ ] Validate Redis tenant-prefixed rate-limit/cache isolation.
+- [ ] Publish operator runbooks for user provisioning, sanctions refresh, DLQ replay,
+  provider quota recovery and key rotation.
 
-## P2 — hardening and later adapters
+## VPS acceptance — owner inputs
 
-- [ ] Provision the optional Langfuse v3 profile with ClickHouse, Valkey and blob storage.
-- [ ] Add Slack/Teams notification adapters without coupling them to case transitions.
-- [ ] Add Kubernetes manifests only after the Compose acceptance profile passes.
-- [ ] Reuse the verified platform for broader invoice exception and payment workflows only after all P0 gates pass.
+- [ ] Ubuntu 24.04 x86_64 VPS: at least 8 vCPU, 32 GB RAM and 200 GB disk.
+- [ ] SSH access and a domain DNS record pointing to the VPS.
+- [ ] Server-side SMTP host, port, username, password and verified From address.
+- [ ] Production-generated service/database/encryption secrets.
+- [ ] Gemini project quota/billing suitable for the 100-case run.
+- [ ] Deploy only the release that passed local and CI acceptance.
+
+## Later work
+
+- [ ] Correctly provision optional Langfuse v3 with ClickHouse, Valkey and blob storage.
+- [ ] Add Slack/Teams adapters without coupling them to case transitions.
+- [ ] Add Kubernetes manifests after Compose acceptance is proven.
+- [ ] Replace mock ERP and synthetic identity only through separately scoped integrations.

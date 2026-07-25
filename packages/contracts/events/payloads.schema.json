@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://neurox.local/contracts/events/payloads.schema.json",
+  "title": "NeuroX versioned command payloads",
+  "description": "PII-free required fields for safety-critical commands. The envelope schema applies in addition.",
+  "type": "object",
+  "oneOf": [
+    {"$ref": "#/$defs/agentAnalysis"},
+    {"$ref": "#/$defs/agentErpConfirmed"},
+    {"$ref": "#/$defs/humanDecision"},
+    {"$ref": "#/$defs/caseSubmitted"},
+    {"$ref": "#/$defs/documentProcessing"},
+    {"$ref": "#/$defs/erpOperation"},
+    {"$ref": "#/$defs/invoiceAnalysis"},
+    {"$ref": "#/$defs/invoiceSubmitted"},
+    {"$ref": "#/$defs/notificationDelivery"},
+    {"$ref": "#/$defs/policyPublished"},
+    {"$ref": "#/$defs/sanctionsImport"}
+  ],
+  "$defs": {
+    "uuid": {"type": "string", "format": "uuid"},
+    "hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "agentAnalysis": {
+      "properties": {"event_type": {"const": "agent.analysis.requested.v1"}, "payload": {"type": "object", "required": ["case_id", "run_id"]}},
+      "required": ["event_type", "payload"]
+    },
+    "agentErpConfirmed": {
+      "properties": {"event_type": {"const": "agent.erp.confirmed.v1"}, "payload": {"type": "object", "required": ["case_id", "run_id", "operation_id", "status"]}},
+      "required": ["event_type", "payload"]
+    },
+    "humanDecision": {
+      "properties": {
+        "event_type": {"enum": ["approval.approved.v1", "approval.rejected.v1", "approval.more_info.v1", "approval.escalated.v1", "review.resolved.v1", "clarification.answered.v1"]},
+        "payload": {"type": "object", "required": ["case_id", "run_id", "task_id", "decision", "expected_version", "actor_id"]}
+      },
+      "required": ["event_type", "payload"]
+    },
+    "caseSubmitted": {
+      "properties": {"event_type": {"const": "case.submitted.v1"}, "payload": {"type": "object", "required": ["case_id", "run_id"]}},
+      "required": ["event_type", "payload"]
+    },
+    "documentProcessing": {
+      "properties": {"event_type": {"const": "document.processing.requested.v1"}, "payload": {"type": "object", "required": ["document_id", "case_id"]}},
+      "required": ["event_type", "payload"]
+    },
+    "erpOperation": {
+      "properties": {
+        "event_type": {"enum": ["erp.sync.requested.v1", "invoice.resolution.approved.v1"]},
+        "payload": {"type": "object", "required": ["case_id", "run_id", "approval_task_id", "evidence_hash"]}
+      },
+      "required": ["event_type", "payload"]
+    },
+    "invoiceAnalysis": {
+      "properties": {"event_type": {"const": "invoice.analysis.requested.v1"}, "payload": {"type": "object", "required": ["case_id", "run_id"]}},
+      "required": ["event_type", "payload"]
+    },
+    "invoiceSubmitted": {
+      "properties": {"event_type": {"const": "invoice.submitted.v1"}, "payload": {"type": "object", "required": ["case_id", "run_id"]}},
+      "required": ["event_type", "payload"]
+    },
+    "notificationDelivery": {
+      "properties": {"event_type": {"const": "notification.delivery.requested.v1"}, "payload": {"type": "object", "required": ["notification_id", "attempt"]}},
+      "required": ["event_type", "payload"]
+    },
+    "policyPublished": {
+      "properties": {"event_type": {"const": "policy.published.v1"}, "payload": {"type": "object", "required": ["policy_version_id"]}},
+      "required": ["event_type", "payload"]
+    },
+    "sanctionsImport": {
+      "properties": {"event_type": {"const": "sanctions.import.requested.v1"}, "payload": {"type": "object", "required": ["sanctions_import_id", "source"]}},
+      "required": ["event_type", "payload"]
+    }
+  }
+}

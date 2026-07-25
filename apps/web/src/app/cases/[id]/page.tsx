@@ -9,6 +9,8 @@ import { api, type ApprovalTask } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { StatusChip } from "@/components/status-chip";
+import { CaseClarification } from "@/components/case-clarification";
+import { CaseDocumentReview } from "@/components/case-document-review";
 
 export default function CaseDetail() {
   const caseId = String(useParams().id);
@@ -19,7 +21,11 @@ export default function CaseDetail() {
   const events = useQuery({ queryKey: ["events", caseId], queryFn: () => api.getEvents(caseId) });
   const evidence = useQuery({ queryKey: ["evidence", caseId], queryFn: () => api.getEvidence(caseId) });
   const approvals = useQuery({ queryKey: ["approvals"], queryFn: api.listApprovals });
-  const task = useMemo(() => (approvals.data ?? []).find((item) => item.case_id === caseId), [approvals.data, caseId]);
+  const reviews = useQuery({ queryKey: ["reviews"], queryFn: api.listReviews });
+  const task = useMemo(
+    () => [...(reviews.data ?? []), ...(approvals.data ?? [])].find((item) => item.case_id === caseId),
+    [approvals.data, caseId, reviews.data],
+  );
   const runId = useMemo(() => {
     const submitted = (events.data ?? []).find((event) => event.event_type === "CASE_SUBMITTED");
     return typeof submitted?.payload.run_id === "string" ? submitted.payload.run_id : null;
@@ -32,6 +38,9 @@ export default function CaseDetail() {
       queryClient.invalidateQueries({ queryKey: ["case", caseId] });
       queryClient.invalidateQueries({ queryKey: ["evidence", caseId] });
       queryClient.invalidateQueries({ queryKey: ["approvals"] });
+      queryClient.invalidateQueries({ queryKey: ["reviews"] });
+      queryClient.invalidateQueries({ queryKey: ["clarifications"] });
+      queryClient.invalidateQueries({ queryKey: ["documents", caseId] });
     }).catch((error) => {
       if (!controller.signal.aborted) console.error("SSE connection failed", error);
     });
@@ -46,14 +55,35 @@ export default function CaseDetail() {
         queryClient.invalidateQueries({ queryKey: ["case", caseId] }),
         queryClient.invalidateQueries({ queryKey: ["events", caseId] }),
         queryClient.invalidateQueries({ queryKey: ["approvals"] }),
+        queryClient.invalidateQueries({ queryKey: ["reviews"] }),
       ]);
     },
     onError: (error) => setDecisionError(error.message),
+  });
+  const ownership = useMutation({
+    mutationFn: (action: "claim" | "release") =>
+      action === "claim"
+        ? api.claimCase(caseId, caseQuery.data!.current_version)
+        : api.releaseCase(caseId, caseQuery.data!.current_version),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["case", caseId] }),
+        queryClient.invalidateQueries({ queryKey: ["events", caseId] }),
+        queryClient.invalidateQueries({ queryKey: ["/api/v1/work-queue"] }),
+      ]);
+    },
   });
 
   if (caseQuery.isLoading) return <p className="p-12" aria-live="polite">Loading case…</p>;
   if (caseQuery.isError || !caseQuery.data) return <p className="p-12 text-red-800" role="alert">Unable to load case: {caseQuery.error?.message}</p>;
   const currentCase = caseQuery.data;
+  const duplicateCandidates = Array.isArray(task?.evidence_packet.duplicate_candidates)
+    ? task.evidence_packet.duplicate_candidates as Array<Record<string, unknown>>
+    : [];
+  const riskPacket = task?.evidence_packet.risk;
+  const sanctionsCandidates = riskPacket && typeof riskPacket === "object" && "candidates" in riskPacket && Array.isArray(riskPacket.candidates)
+    ? riskPacket.candidates as Array<Record<string, unknown>>
+    : [];
   const currencyCode = task?.evidence_packet.extracted_invoice?.currency || "USD";
   const formatCurrency = (amount: number | string | undefined | null) => {
     if (amount == null || amount === "-") return "-";
@@ -73,11 +103,28 @@ export default function CaseDetail() {
             <p className="mt-1 text-sm text-[var(--color-muted)]">Version {currentCase.current_version} · Updated {new Date(currentCase.updated_at).toLocaleString()}</p>
           </div>
         </div>
-        <StatusChip status={currentCase.status} />
+        <div className="flex flex-wrap items-center gap-3">
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={ownership.isPending}
+            onClick={() => ownership.mutate(currentCase.assigned_user_id ? "release" : "claim")}
+          >
+            {currentCase.assigned_user_id ? "Release ownership" : "Claim case"}
+          </Button>
+          <StatusChip status={currentCase.status} />
+        </div>
       </header>
+      {ownership.isError && (
+        <p role="alert" className="mb-6 rounded-xl bg-red-50 p-3 text-sm text-red-900">
+          Ownership change failed: {ownership.error.message}
+        </p>
+      )}
 
       <div className="grid gap-8 xl:grid-cols-[1.25fr_1fr]">
         <div className="space-y-8">
+          <CaseClarification caseId={caseId} caseVersion={currentCase.current_version} />
+          <CaseDocumentReview caseId={caseId} caseVersion={currentCase.current_version} />
           <Card>
             <div className="mb-6 flex items-center gap-3"><FileSearch className="h-6 w-6 text-[var(--color-accent)]" /><h2 className="font-display text-xl font-bold">Observable workflow events</h2></div>
             <ol className="space-y-5">
@@ -179,6 +226,41 @@ export default function CaseDetail() {
               </div>
             </Card>
           )}
+
+          {(duplicateCandidates.length > 0 || sanctionsCandidates.length > 0) && (
+            <Card>
+              <div className="mb-5 flex items-center gap-3">
+                <ShieldAlert className="h-6 w-6 text-[var(--color-accent)]" />
+                <div>
+                  <h2 className="font-display text-xl font-bold">Mandatory control review</h2>
+                  <p className="text-sm text-[var(--color-muted)]">
+                    Candidates are deterministic leads. A human must resolve them; Gemini cannot clear a match.
+                  </p>
+                </div>
+              </div>
+              <div className="grid gap-5 lg:grid-cols-2">
+                {duplicateCandidates.map((candidate, index) => (
+                  <article key={String(candidate.vendor_id ?? index)} className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+                    <p className="text-xs font-bold uppercase tracking-wider text-amber-900">Duplicate candidate</p>
+                    <p className="mt-2 font-bold">{String(candidate.name ?? candidate.vendor_id ?? "Existing vendor")}</p>
+                    <p className="mt-1 text-sm">Score {Math.round(Number(candidate.score ?? 0) * 100)}%</p>
+                    <pre className="mt-3 overflow-auto whitespace-pre-wrap text-xs">{JSON.stringify(candidate.signals ?? {}, null, 2)}</pre>
+                  </article>
+                ))}
+                {sanctionsCandidates.map((candidate, index) => (
+                  <article key={String(candidate.entity_id ?? index)} className="rounded-2xl border border-red-200 bg-red-50 p-4">
+                    <p className="text-xs font-bold uppercase tracking-wider text-red-900">Sanctions candidate</p>
+                    <p className="mt-2 font-bold">{String(candidate.matched_name ?? candidate.entity_id ?? "Listed entity")}</p>
+                    <p className="mt-1 text-sm">{String(candidate.source ?? "Official list")} · version {String(candidate.version ?? "unknown")}</p>
+                    <p className="mt-1 text-sm">Similarity {Math.round(Number(candidate.score ?? 0) * 100)}%</p>
+                  </article>
+                ))}
+              </div>
+              <p className="mt-5 rounded-xl bg-slate-100 p-3 text-sm">
+                What resolves this: record an evidence-bound disposition on the pending {task?.task_type.replaceAll("_", " ").toLowerCase()} task. The next control is created only after this decision is committed.
+              </p>
+            </Card>
+          )}
         </div>
 
         <aside className="space-y-8">
@@ -187,6 +269,7 @@ export default function CaseDetail() {
             {task ? (
               <>
                 <p className="mt-2 text-sm text-[var(--color-muted)]">Review the evidence before acting. This decision is bound to case version {task.case_version} and hash:</p>
+                <p className="mt-2 rounded-full bg-amber-100 px-3 py-1 text-xs font-bold text-amber-900">{task.task_type.replaceAll("_", " ")}</p>
                 <code className="mt-4 block break-all rounded-xl bg-slate-900 p-3 text-xs text-slate-200">{task.evidence_hash}</code>
                 <label htmlFor="decision-comment" className="mb-2 mt-5 block text-sm font-bold">Decision comment</label>
                 <textarea id="decision-comment" value={comment} onChange={(event) => setComment(event.target.value)} rows={4} className="w-full rounded-2xl bg-transparent p-4 shadow-[var(--shadow-inset)] outline-none focus:ring-2 focus:ring-[var(--color-accent)]" placeholder="Required when rejecting; recommended for approval" />

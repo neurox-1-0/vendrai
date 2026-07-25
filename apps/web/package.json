@@ -6,7 +6,10 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "openapi:export": "cd ../../services/api && .venv/bin/python -m scripts.export_openapi",
+    "api:generate": "orval --config orval.config.ts",
+    "api:check": "npm run openapi:export && npm run api:generate && git diff --exit-code -- ../../packages/contracts/openapi.json src/generated"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.101.2",
@@ -25,10 +28,14 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "^16.2.11",
+    "orval": "8.22.0",
     "tailwindcss": "^4",
     "typescript": "^5"
   },
   "overrides": {
+    "brace-expansion": "5.0.8",
+    "js-yaml": "4.3.0",
+    "minimatch": "10.2.5",
     "postcss": "8.5.18",
     "sharp": "0.35.0"
   }

@@ -1,14 +1,15 @@
+import asyncio
 import json
 import logging
-import asyncio
 from collections.abc import Awaitable, Callable
 from typing import Any
 
 import aio_pika
 from aio_pika import ExchangeType, IncomingMessage, Message
-
 from app.config import settings
-
+from app.observability import configure_worker_observability
+from opentelemetry import propagate, trace
+from opentelemetry.trace import Status, StatusCode
 
 logger = logging.getLogger(__name__)
 Handler = Callable[[dict[str, Any]], Awaitable[None]]
@@ -32,6 +33,7 @@ async def declare_topology(channel: aio_pika.abc.AbstractChannel):
 
 
 async def consume(worker_name: str, bindings: list[str], handler: Handler) -> None:
+    configure_worker_observability(worker_name)
     connection = await open_broker()
     channel = await connection.channel(publisher_confirms=True)
     await channel.set_qos(prefetch_count=1)
@@ -70,7 +72,29 @@ async def consume(worker_name: str, bindings: list[str], handler: Handler) -> No
             envelope = json.loads(message.body)
             if not isinstance(envelope, dict):
                 raise ValueError("EVENT_ENVELOPE_MUST_BE_AN_OBJECT")
-            await handler(envelope)
+            parent_context = propagate.extract(
+                {"traceparent": envelope.get("traceparent", "")}
+            )
+            tracer = trace.get_tracer("neurox.messaging")
+            with tracer.start_as_current_span(
+                "message.consume",
+                context=parent_context,
+                attributes={
+                    "messaging.system": "rabbitmq",
+                    "messaging.operation.name": "process",
+                    "messaging.destination.name": f"neurox.{worker_name}",
+                    "messaging.message.type": str(envelope.get("event_type", "")),
+                    "neurox.schema_version": int(
+                        envelope.get("schema_version", 1)
+                    ),
+                },
+            ) as span:
+                try:
+                    await handler(envelope)
+                except Exception as exc:
+                    span.record_exception(exc)
+                    span.set_status(Status(StatusCode.ERROR))
+                    raise
             await message.ack()
         except Exception:
             headers = dict(message.headers or {})
@@ -108,11 +132,17 @@ async def consume(worker_name: str, bindings: list[str], handler: Handler) -> No
 
 
 def message_for(envelope: dict[str, Any]) -> Message:
+    headers: dict[str, Any] = {
+        "schema_version": envelope.get("schema_version", 1),
+        "tenant_id": envelope["tenant_id"],
+    }
+    if envelope.get("traceparent"):
+        headers["traceparent"] = envelope["traceparent"]
     return Message(
         body=json.dumps(envelope, separators=(",", ":"), default=str).encode(),
         content_type="application/cloudevents+json",
         message_id=envelope["event_id"],
         correlation_id=envelope.get("correlation_id"),
         delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
-        headers={"schema_version": envelope.get("schema_version", 1), "tenant_id": envelope["tenant_id"]},
+        headers=headers,
     )

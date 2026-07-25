@@ -4,6 +4,10 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from app.domain.cases import CaseStatus
+from app.domain.pii import mask_sensitive_text
+
+
 class ApiMeta(BaseModel):
     request_id: str
     timestamp: datetime
@@ -25,10 +29,11 @@ class CaseResponse(BaseModel):
     tenant_id: UUID
     case_number: str
     case_type: str
-    status: str
+    status: CaseStatus
     title: str
     priority: str
     requester_user_id: UUID
+    assigned_user_id: UUID | None
     current_version: int
     created_at: datetime
     updated_at: datetime
@@ -39,10 +44,29 @@ class CaseListResponse(BaseModel):
     total: int
 
 
+class WorkQueueItem(CaseResponse):
+    age_seconds: int
+    ownership: Literal["UNCLAIMED", "MINE", "OTHER"]
+
+
+class WorkQueueResponse(BaseModel):
+    items: list[WorkQueueItem]
+    total: int
+
+
+class AuditExportResponse(BaseModel):
+    audit_export_id: UUID
+    case_id: UUID
+    status: str
+    sha256: str
+    expires_at: datetime
+    download_url: str
+
+
 class ActionAccepted(BaseModel):
     case_id: UUID
     run_id: UUID | None = None
-    status: str
+    status: CaseStatus
     event_url: str | None = None
 
 
@@ -72,6 +96,47 @@ class DocumentResponse(BaseModel):
     malware_status: str
     processing_status: str
     created_at: datetime
+
+
+class DocumentPageResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    page_id: UUID
+    document_id: UUID
+    page_number: int
+    text_content: str | None
+    layout_json: dict[str, Any]
+    ocr_confidence: float | None
+
+
+class ExtractedFieldResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    extracted_field_id: UUID
+    document_id: UUID
+    field_name: str
+    field_value_masked: str | None
+    confidence: float | None
+    source_page: int | None
+    source_bbox: dict[str, Any]
+    extractor_type: str
+    extractor_version: str | None
+    human_verified: bool
+    updated_at: datetime
+
+
+class FieldCorrectionRequest(BaseModel):
+    value: str = Field(min_length=1, max_length=2000)
+    expected_version: int = Field(gt=0)
+    reason: str = Field(min_length=3, max_length=500)
+
+    @field_validator("value")
+    @classmethod
+    def normalize_correction_value(cls, value: str) -> str:
+        return " ".join(value.split())
+
+    @field_validator("reason")
+    @classmethod
+    def normalize_and_mask_correction_reason(cls, value: str) -> str:
+        return mask_sensitive_text(" ".join(value.split()))
 
 
 class EventResponse(BaseModel):
@@ -119,7 +184,10 @@ class ApprovalDecisionRequest(BaseModel):
     expected_version: int = Field(gt=0)
     evidence_hash: str = Field(min_length=64, max_length=64)
     comment: str | None = Field(default=None, max_length=2000)
-    edited_payload: dict[str, Any] = Field(default_factory=dict)
+    edited_payload: dict[str, Any] = Field(
+        default_factory=dict,
+        json_schema_extra={"maxProperties": 0},
+    )
 
     @field_validator("comment")
     @classmethod
@@ -127,6 +195,15 @@ class ApprovalDecisionRequest(BaseModel):
         decision = info.data.get("decision")
         if decision in {"REJECTED", "MORE_INFO", "ESCALATED"} and not value:
             raise ValueError("A comment is required for this decision")
+        return mask_sensitive_text(" ".join(value.split())) if value else None
+
+    @field_validator("edited_payload")
+    @classmethod
+    def reject_unverified_payload_edits(cls, value: dict[str, Any]):
+        if value:
+            raise ValueError(
+                "Payload edits require field correction, reanalysis and a new evidence hash"
+            )
         return value
 
 
@@ -152,6 +229,50 @@ class HealthResponse(BaseModel):
     checks: dict[str, str]
 
 
+class IntegrationCheck(BaseModel):
+    status: Literal["HEALTHY", "DEGRADED", "UNAVAILABLE", "DISABLED"]
+    error_code: str | None = None
+    action: str | None = None
+    metadata: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
+
+
+class IntegrationHealthResponse(BaseModel):
+    status: Literal["HEALTHY", "DEGRADED"]
+    checks: dict[str, IntegrationCheck]
+
+
+class SanctionsImportRequest(BaseModel):
+    source: Literal["OFAC", "UN", "EU"]
+
+
+class SanctionsImportResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    sanctions_import_id: UUID
+    source: str
+    source_url: str
+    status: str
+    dataset_id: UUID | None
+    etag: str | None
+    sha256: str | None
+    entity_count: int | None
+    error_code: str | None
+    started_at: datetime | None
+    completed_at: datetime | None
+    created_at: datetime
+
+
+class SanctionsDatasetResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    dataset_id: UUID
+    source: str
+    version: str
+    source_url: str
+    sha256: str
+    status: str
+    published_at: datetime | None
+    created_at: datetime
+
+
 class PolicyUploadRequest(BaseModel):
     policy_code: str = Field(min_length=2, max_length=80, pattern=r"^[A-Z0-9_-]+$")
     title: str = Field(min_length=3, max_length=240)
@@ -174,6 +295,19 @@ class PolicyResponse(BaseModel):
 class ClarificationResponseRequest(BaseModel):
     answers: dict[str, str]
     expected_version: int = Field(gt=0)
+
+
+class ClarificationTaskResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    clarification_task_id: UUID
+    case_id: UUID
+    run_id: UUID
+    status: str
+    questions: list[dict[str, Any]]
+    response: dict[str, Any]
+    responded_by: UUID | None
+    responded_at: datetime | None
+    created_at: datetime
 
 
 class InvoiceSubmissionRequest(BaseModel):

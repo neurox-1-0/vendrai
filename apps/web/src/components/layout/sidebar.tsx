@@ -7,18 +7,21 @@ import { Button } from '@/components/ui/button';
 import { LayoutDashboard, FileText, Users, Activity, Settings, HelpCircle, ClipboardList, Receipt } from 'lucide-react';
 import { motion } from 'framer-motion';
 import Image from 'next/image';
+import { useAuth } from '@/app/providers';
 
 export function Sidebar() {
   const pathname = usePathname();
+  const { roles } = useAuth();
 
   const navItems = [
     { name: 'Dashboard', href: '/', icon: LayoutDashboard },
-    { name: 'Supplier Onboarding', href: '/cases/new', icon: FileText },
-    { name: 'Invoice Exceptions', href: '/invoices/new', icon: Receipt },
-    { name: 'Approvals', href: '/approvals', icon: Users },
-    { name: 'Analytics', href: '/analytics', icon: Activity },
-    { name: 'Reports', href: '/reports', icon: ClipboardList },
-  ];
+    { name: 'Supplier Onboarding', href: '/cases/new', icon: FileText, roles: ['requester', 'analyst', 'admin'] },
+    { name: 'Invoice Exceptions', href: '/invoices/new', icon: Receipt, roles: ['requester', 'analyst', 'admin'] },
+    { name: 'Approvals', href: '/approvals', icon: Users, roles: ['analyst', 'approver', 'procurement_approver', 'compliance_approver', 'finance_approver', 'auditor', 'admin'] },
+    { name: 'Analytics', href: '/analytics', icon: Activity, roles: ['analyst', 'auditor', 'admin'] },
+    { name: 'Reports', href: '/reports', icon: ClipboardList, roles: ['auditor', 'admin'] },
+    { name: 'Admin Health', href: '/admin', icon: Settings, roles: ['admin'] },
+  ].filter((item) => !item.roles || item.roles.some((role) => roles.has(role)));
 
   return (
     <>
@@ -56,9 +59,6 @@ export function Sidebar() {
         <nav className="space-y-4">
           <Button type="button" variant="secondary" className="w-full justify-start gap-4 opacity-70 hover:opacity-100">
             <HelpCircle className="h-5 w-5" /> Help & Support
-          </Button>
-          <Button type="button" variant="secondary" className="w-full justify-start gap-4 opacity-70 hover:opacity-100">
-            <Settings className="h-5 w-5" /> Settings
           </Button>
         </nav>
       </div>
