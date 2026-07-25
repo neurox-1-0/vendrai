@@ -1,0 +1,4 @@
+vendor_id,legal_name,tax_id,registration_no,bank_account,email_domain,status
+V000184,Northstar Office Systems (Pvt) Ltd,114598732,PV 198423,003-441-8821,northstar-office.example,ACTIVE
+V000233,Apex Digital Supplies (Pvt) Ltd,119887654,PV 201110,011-987-4402,apex-digital.example,ACTIVE
+V000301,Harborline Logistics (Pvt) Ltd,116670845,PV 176402,014-120-3177,harborline-logistics.example,ACTIVE

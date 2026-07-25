@@ -1,0 +1,182 @@
+[
+  {
+    "path": "README.md",
+    "size_bytes": 1050
+  },
+  {
+    "path": "cases/AP-001_clean_three_way_match/01_purchase_order.pdf",
+    "size_bytes": 3455
+  },
+  {
+    "path": "cases/AP-001_clean_three_way_match/02_goods_receipt_note.pdf",
+    "size_bytes": 3121
+  },
+  {
+    "path": "cases/AP-001_clean_three_way_match/03_tax_invoice.pdf",
+    "size_bytes": 3385
+  },
+  {
+    "path": "cases/AP-002_price_variance/01_purchase_order.pdf",
+    "size_bytes": 3449
+  },
+  {
+    "path": "cases/AP-002_price_variance/02_goods_receipt_note.pdf",
+    "size_bytes": 3106
+  },
+  {
+    "path": "cases/AP-002_price_variance/03_tax_invoice.pdf",
+    "size_bytes": 3379
+  },
+  {
+    "path": "cases/AP-003_quantity_exceeds_receipt/01_purchase_order.pdf",
+    "size_bytes": 3452
+  },
+  {
+    "path": "cases/AP-003_quantity_exceeds_receipt/02_goods_receipt_note.pdf",
+    "size_bytes": 3133
+  },
+  {
+    "path": "cases/AP-003_quantity_exceeds_receipt/03_tax_invoice.pdf",
+    "size_bytes": 3380
+  },
+  {
+    "path": "cases/AP-004_duplicate_invoice_submission/01_purchase_order.pdf",
+    "size_bytes": 3452
+  },
+  {
+    "path": "cases/AP-004_duplicate_invoice_submission/02_goods_receipt_note.pdf",
+    "size_bytes": 3111
+  },
+  {
+    "path": "cases/AP-004_duplicate_invoice_submission/03_tax_invoice.pdf",
+    "size_bytes": 3380
+  },
+  {
+    "path": "cases/AP-005_tax_rate_mismatch/01_purchase_order.pdf",
+    "size_bytes": 3451
+  },
+  {
+    "path": "cases/AP-005_tax_rate_mismatch/02_goods_receipt_note.pdf",
+    "size_bytes": 3110
+  },
+  {
+    "path": "cases/AP-005_tax_rate_mismatch/03_tax_invoice.pdf",
+    "size_bytes": 3385
+  },
+  {
+    "path": "cases/AP-006_missing_purchase_order_reference/01_tax_invoice.pdf",
+    "size_bytes": 3468
+  },
+  {
+    "path": "cases/AP-007_unverified_bank_account_change/01_purchase_order.pdf",
+    "size_bytes": 3444
+  },
+  {
+    "path": "cases/AP-007_unverified_bank_account_change/02_goods_receipt_note.pdf",
+    "size_bytes": 3108
+  },
+  {
+    "path": "cases/AP-007_unverified_bank_account_change/03_tax_invoice_with_new_bank_account.pdf",
+    "size_bytes": 3509
+  },
+  {
+    "path": "cases/VO-001_standard_vendor_onboarding/01_supplier_onboarding_form.pdf",
+    "size_bytes": 3837
+  },
+  {
+    "path": "cases/VO-001_standard_vendor_onboarding/02_tax_registration_certificate.pdf",
+    "size_bytes": 3020
+  },
+  {
+    "path": "cases/VO-001_standard_vendor_onboarding/03_bank_account_confirmation.pdf",
+    "size_bytes": 3163
+  },
+  {
+    "path": "cases/VO-001_standard_vendor_onboarding/04_insurance_certificate.pdf",
+    "size_bytes": 3124
+  },
+  {
+    "path": "cases/VO-001_standard_vendor_onboarding/05_information_security_questionnaire.pdf",
+    "size_bytes": 3441
+  },
+  {
+    "path": "cases/VO-002_potential_duplicate_vendor/01_supplier_onboarding_form.pdf",
+    "size_bytes": 3836
+  },
+  {
+    "path": "cases/VO-002_potential_duplicate_vendor/02_tax_registration_certificate.pdf",
+    "size_bytes": 3015
+  },
+  {
+    "path": "cases/VO-002_potential_duplicate_vendor/03_bank_account_confirmation.pdf",
+    "size_bytes": 3171
+  },
+  {
+    "path": "cases/VO-003_cross_border_high_risk_vendor/01_supplier_onboarding_form.pdf",
+    "size_bytes": 3941
+  },
+  {
+    "path": "cases/VO-003_cross_border_high_risk_vendor/02_bank_account_confirmation.pdf",
+    "size_bytes": 3169
+  },
+  {
+    "path": "cases/VO-003_cross_border_high_risk_vendor/03_insurance_certificate.pdf",
+    "size_bytes": 3123
+  },
+  {
+    "path": "cases/VO-003_cross_border_high_risk_vendor/04_information_security_questionnaire.pdf",
+    "size_bytes": 3485
+  },
+  {
+    "path": "cases/VO-004_low_quality_document_and_untrusted_instruction/01_supplier_onboarding_form_scan.pdf",
+    "size_bytes": 345671
+  },
+  {
+    "path": "cases/VO-004_low_quality_document_and_untrusted_instruction/02_bank_account_confirmation.pdf",
+    "size_bytes": 3155
+  },
+  {
+    "path": "cases/VO-004_low_quality_document_and_untrusted_instruction/03_supplier_instruction_note.pdf",
+    "size_bytes": 2828
+  },
+  {
+    "path": "cases/VO-005_bank_beneficiary_mismatch/01_supplier_onboarding_form.pdf",
+    "size_bytes": 3833
+  },
+  {
+    "path": "cases/VO-005_bank_beneficiary_mismatch/02_tax_registration_certificate.pdf",
+    "size_bytes": 3004
+  },
+  {
+    "path": "cases/VO-005_bank_beneficiary_mismatch/03_bank_account_confirmation.pdf",
+    "size_bytes": 3148
+  },
+  {
+    "path": "cases/VO-005_bank_beneficiary_mismatch/04_beneficial_ownership_declaration.pdf",
+    "size_bytes": 2974
+  },
+  {
+    "path": "ground_truth/existing_invoice_history.csv",
+    "size_bytes": 217
+  },
+  {
+    "path": "ground_truth/existing_vendor_master.csv",
+    "size_bytes": 398
+  },
+  {
+    "path": "ground_truth/expected_case_outcomes.json",
+    "size_bytes": 3354
+  },
+  {
+    "path": "ground_truth/mock_risk_api_results.json",
+    "size_bytes": 936
+  },
+  {
+    "path": "knowledge_base/AP-001_Invoice_Matching_and_Exception_Policy.pdf",
+    "size_bytes": 4979
+  },
+  {
+    "path": "knowledge_base/PROC-001_Supplier_Onboarding_Policy.pdf",
+    "size_bytes": 5114
+  }
+]

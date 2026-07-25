@@ -1,0 +1,109 @@
+{
+  "VO-001": {
+    "expected_status": "READY_FOR_APPROVAL",
+    "risk": "LOW",
+    "findings": [
+      "required documents present",
+      "bank beneficiary matches legal name",
+      "risk checks clear"
+    ],
+    "required_human_action": "approve or reject vendor creation"
+  },
+  "VO-002": {
+    "expected_status": "HUMAN_REVIEW_REQUIRED",
+    "risk": "HIGH",
+    "findings": [
+      "exact tax ID match to existing vendor V000233",
+      "exact bank account match to existing vendor V000233",
+      "legal name variation"
+    ],
+    "required_human_action": "duplicate resolution by Vendor Master Control"
+  },
+  "VO-003": {
+    "expected_status": "ENHANCED_REVIEW_REQUIRED",
+    "risk": "HIGH",
+    "findings": [
+      "supplier registered in Singapore but bank account is in Hong Kong",
+      "annual spend above LKR 5 million",
+      "company data access declared",
+      "data stored outside Sri Lanka",
+      "data processing agreement unavailable",
+      "insurance expired"
+    ],
+    "required_human_action": "Treasury, Information Security, Legal, Procurement Director, and Finance Controller review"
+  },
+  "VO-004": {
+    "expected_status": "CLARIFICATION_REQUIRED",
+    "risk": "MEDIUM",
+    "findings": [
+      "low OCR confidence",
+      "external document contains an instruction attempting to override workflow controls",
+      "risk service unavailable"
+    ],
+    "required_human_action": "request clearer onboarding form and complete verification"
+  },
+  "VO-005": {
+    "expected_status": "HUMAN_REVIEW_REQUIRED",
+    "risk": "HIGH",
+    "findings": [
+      "bank beneficiary is an individual rather than the legal supplier",
+      "annual spend above LKR 5 million",
+      "possible adverse-media name match"
+    ],
+    "required_human_action": "independent bank verification, ownership review, Treasury and senior approval"
+  },
+  "AP-001": {
+    "expected_status": "READY_FOR_AP_APPROVAL",
+    "exception": "NONE",
+    "findings": [
+      "PO, receipt, and invoice quantity match",
+      "unit price match",
+      "tax rate 18 percent"
+    ]
+  },
+  "AP-002": {
+    "expected_status": "PROCUREMENT_REVIEW_REQUIRED",
+    "exception": "PRICE_VARIANCE",
+    "findings": [
+      "invoice unit price exceeds PO by 7.02 percent",
+      "variance exceeds 2 percent tolerance"
+    ]
+  },
+  "AP-003": {
+    "expected_status": "HOLD",
+    "exception": "QUANTITY_VARIANCE",
+    "findings": [
+      "invoice quantity 50 exceeds accepted receipt quantity 40"
+    ]
+  },
+  "AP-004": {
+    "expected_status": "BLOCKED_DUPLICATE",
+    "exception": "DUPLICATE_INVOICE",
+    "findings": [
+      "same supplier and invoice number already recorded as paid"
+    ]
+  },
+  "AP-005": {
+    "expected_status": "TAX_REVIEW_REQUIRED",
+    "exception": "TAX_MISMATCH",
+    "findings": [
+      "invoice tax rate is 15 percent while configured reference is 18 percent"
+    ]
+  },
+  "AP-006": {
+    "expected_status": "CLARIFICATION_REQUIRED",
+    "exception": "MISSING_PO",
+    "findings": [
+      "purchase order reference not stated",
+      "service described as emergency freight"
+    ]
+  },
+  "AP-007": {
+    "expected_status": "HOLD",
+    "exception": "BANK_DETAIL_MISMATCH",
+    "findings": [
+      "invoice remittance account differs from verified vendor master account",
+      "invoice instruction is insufficient to change bank details"
+    ]
+  }
+}

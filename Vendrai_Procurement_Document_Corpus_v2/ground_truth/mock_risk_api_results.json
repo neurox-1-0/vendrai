@@ -1,0 +1,32 @@
+{
+  "Northstar Office Systems (Pvt) Ltd": {
+    "sanctions": "CLEAR",
+    "adverse_media": "NO MATERIAL MATCH",
+    "country_risk": "LOW",
+    "checked_at": "2026-07-12T09:42:11+05:30"
+  },
+  "Apex Digitech Solutions (Pvt) Ltd": {
+    "sanctions": "CLEAR",
+    "adverse_media": "NO MATERIAL MATCH",
+    "country_risk": "LOW",
+    "checked_at": "2026-07-14T11:03:44+05:30"
+  },
+  "Nimbus Data Services Pte. Ltd.": {
+    "sanctions": "CLEAR",
+    "adverse_media": "NO MATERIAL MATCH",
+    "country_risk": "MEDIUM",
+    "checked_at": "2026-07-16T14:20:00+05:30"
+  },
+  "Crescent Stationery Traders": {
+    "sanctions": "UNAVAILABLE",
+    "adverse_media": "NOT RUN",
+    "country_risk": "LOW",
+    "checked_at": "2026-07-18T15:05:20+05:30"
+  },
+  "Harborline Logistics (Pvt) Ltd": {
+    "sanctions": "CLEAR",
+    "adverse_media": "POSSIBLE NAME MATCH - REVIEW",
+    "country_risk": "LOW",
+    "checked_at": "2026-07-20T10:10:00+05:30"
+  }
+}
