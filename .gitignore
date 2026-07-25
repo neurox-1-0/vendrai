@@ -23,6 +23,8 @@ Database Schema/
 !README.md
 !CURRENT_STATUS.md
 !MASTER_TODO.md
+!docs/
+!docs/backup-restore-runbook.md
 
 # Node/Python specific ignores
 node_modules/

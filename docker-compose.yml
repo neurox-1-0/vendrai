@@ -16,8 +16,15 @@ x-api-image: &api-image
     REDIS_URL: redis://redis:6379/0
     QDRANT_URL: http://qdrant:6333
     RETRIEVAL_URL: http://retrieval-api:8100
-    STORAGE_BACKEND: local
+    OPA_URL: http://opa:8181
+    STORAGE_BACKEND: s3
     LOCAL_STORAGE_ROOT: /var/lib/neurox/objects
+    S3_ENDPOINT_URL: http://minio:9000
+    S3_PUBLIC_ENDPOINT_URL: ${S3_PUBLIC_ENDPOINT_URL:-http://localhost:9000}
+    S3_ACCESS_KEY: ${MINIO_APP_USER:?set MINIO_APP_USER}
+    S3_SECRET_KEY: ${MINIO_APP_PASSWORD:?set MINIO_APP_PASSWORD}
+    S3_QUARANTINE_BUCKET: neurox-quarantine
+    S3_DOCUMENT_BUCKET: neurox-documents
     CLAMAV_HOST: clamav
     CLAMAV_REQUIRED: "true"
     SMTP_HOST: mailpit
@@ -26,6 +33,13 @@ x-api-image: &api-image
     KEYCLOAK_ISSUER: http://localhost:8080/realms/neurox
     KEYCLOAK_JWKS_URL: http://keycloak:8080/realms/neurox/protocol/openid-connect/certs
     OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+    OTEL_ENABLED: "true"
+    DEFAULT_MODEL: gemini-3.6-flash
+    ALLOW_EXTERNAL_LLM: ${ALLOW_EXTERNAL_LLM:-true}
+    LLM_DATA_CLASSIFICATION: ${LLM_DATA_CLASSIFICATION:-SYNTHETIC}
+    SANCTIONS_OFAC_URL: ${SANCTIONS_OFAC_URL:-https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/SDN.XML}
+    SANCTIONS_UN_URL: ${SANCTIONS_UN_URL:-https://scsanctions.un.org/resources/xml/en/consolidated.xml}
+    SANCTIONS_EU_URL: ${SANCTIONS_EU_URL:-}
   networks: [app, data]
   volumes:
     - object_data:/var/lib/neurox/objects
@@ -35,13 +49,28 @@ x-worker-depends: &worker-depends
     condition: service_healthy
   rabbitmq:
     condition: service_healthy
-  migrate:
+  seed:
+    condition: service_completed_successfully
+  minio-init:
     condition: service_completed_successfully
 
 services:
   postgres:
-    image: postgres:16.9-bookworm
+    build:
+      context: .
+      dockerfile: infra/postgres/Dockerfile
+    image: neurox-postgres:local
     restart: unless-stopped
+    command:
+      - postgres
+      - -c
+      - archive_mode=on
+      - -c
+      - archive_timeout=900
+      - -c
+      - wal_level=replica
+      - -c
+      - archive_command=pgbackrest --stanza=neurox archive-push %p
     environment:
       POSTGRES_DB: neurox
       POSTGRES_USER: neurox_migration
@@ -50,6 +79,18 @@ services:
       NEUROX_WORKER_DB_PASSWORD: ${NEUROX_WORKER_DB_PASSWORD:?set NEUROX_WORKER_DB_PASSWORD}
       NEUROX_RELAY_DB_PASSWORD: ${NEUROX_RELAY_DB_PASSWORD:?set NEUROX_RELAY_DB_PASSWORD}
       NEUROX_AUDIT_DB_PASSWORD: ${NEUROX_AUDIT_DB_PASSWORD:?set NEUROX_AUDIT_DB_PASSWORD}
+      PGBACKREST_REPO1_TYPE: s3
+      PGBACKREST_REPO1_S3_ENDPOINT: minio
+      PGBACKREST_REPO1_S3_PORT: "9000"
+      PGBACKREST_REPO1_S3_REGION: us-east-1
+      PGBACKREST_REPO1_S3_URI_STYLE: path
+      PGBACKREST_REPO1_S3_VERIFY_TLS: "n"
+      PGBACKREST_REPO1_BUCKET: neurox-backups
+      PGBACKREST_REPO1_PATH: /pgbackrest
+      PGBACKREST_REPO1_S3_KEY: ${MINIO_BACKUP_USER:?set MINIO_BACKUP_USER}
+      PGBACKREST_REPO1_S3_KEY_SECRET: ${MINIO_BACKUP_PASSWORD:?set MINIO_BACKUP_PASSWORD}
+      PGBACKREST_REPO1_CIPHER_TYPE: aes-256-cbc
+      PGBACKREST_REPO1_CIPHER_PASS: ${PGBACKREST_REPO_CIPHER_PASS:?set PGBACKREST_REPO_CIPHER_PASS}
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U neurox_migration -d neurox"]
       interval: 5s
@@ -58,6 +99,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./infra/postgres/001-roles.sh:/docker-entrypoint-initdb.d/001-roles.sh:ro
+      - pgbackrest_spool:/var/spool/pgbackrest
     networks: [data]
 
   migrate:
@@ -70,6 +112,14 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+
+  seed:
+    <<: *api-image
+    restart: "no"
+    command: ["python", "-m", "scripts.seed"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
 
   rabbitmq:
     image: rabbitmq:4.1.0-management
@@ -111,7 +161,42 @@ services:
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD}
+      MINIO_API_CORS_ALLOW_ORIGIN: ${WEB_ORIGIN:-http://localhost:3000}
     volumes: [minio_data:/data]
+    ports: ["127.0.0.1:9000:9000", "127.0.0.1:9001:9001"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    networks: [data]
+
+  minio-init:
+    image: minio/mc:RELEASE.2025-04-16T18-13-26Z
+    restart: "no"
+    env_file: .env
+    volumes:
+      - ./infra/minio/neurox-policy.json:/config/neurox-policy.json:ro
+      - ./infra/minio/neurox-backup-policy.json:/config/neurox-backup-policy.json:ro
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"
+        mc mb --ignore-existing local/neurox-quarantine
+        mc mb --ignore-existing local/neurox-documents
+        mc mb --ignore-existing local/neurox-backups
+        mc anonymous set none local/neurox-quarantine
+        mc anonymous set none local/neurox-documents
+        mc anonymous set none local/neurox-backups
+        mc admin policy create local neurox-app /config/neurox-policy.json
+        mc admin user add local "$${MINIO_APP_USER}" "$${MINIO_APP_PASSWORD}" || true
+        mc admin policy attach local neurox-app --user "$${MINIO_APP_USER}"
+        mc admin policy create local neurox-backup /config/neurox-backup-policy.json
+        mc admin user add local "$${MINIO_BACKUP_USER}" "$${MINIO_BACKUP_PASSWORD}" || true
+        mc admin policy attach local neurox-backup --user "$${MINIO_BACKUP_USER}"
+    depends_on:
+      minio:
+        condition: service_healthy
     networks: [data]
 
   clamav:
@@ -135,10 +220,30 @@ services:
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:?set KEYCLOAK_ADMIN}
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?set KEYCLOAK_ADMIN_PASSWORD}
       KC_HOSTNAME: http://localhost:8080
+      KC_HTTP_MANAGEMENT_PORT: "9000"
     ports: ["127.0.0.1:8080:8080"]
     volumes:
       - ./infra/keycloak/neurox-realm.json:/opt/keycloak/data/import/neurox-realm.json:ro
     networks: [app]
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 2 bash -c '</dev/tcp/127.0.0.1/9000'"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  keycloak-bootstrap:
+    image: quay.io/keycloak/keycloak:26.2.5
+    profiles: [acceptance]
+    restart: "no"
+    env_file: .env
+    entrypoint: ["/bin/bash", "/bootstrap/bootstrap-acceptance.sh"]
+    volumes:
+      - ./infra/keycloak/bootstrap-acceptance.sh:/bootstrap/bootstrap-acceptance.sh:ro
+    networks: [app]
+    depends_on:
+      keycloak:
+        condition: service_healthy
 
   opa:
     image: openpolicyagent/opa:1.5.1-static
@@ -160,6 +265,48 @@ services:
     volumes: [./infra/otel/collector.yaml:/etc/otelcol/config.yaml:ro]
     ports: ["127.0.0.1:4318:4318"]
     networks: [app]
+    depends_on:
+      tempo:
+        condition: service_started
+
+  tempo:
+    image: grafana/tempo:2.8.1
+    restart: unless-stopped
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+    volumes:
+      - ./infra/otel/tempo.yaml:/etc/tempo/tempo.yaml:ro
+      - tempo_data:/var/tempo
+    networks: [app]
+
+  prometheus:
+    image: prom/prometheus:v3.4.1
+    restart: unless-stopped
+    command: ["--config.file=/etc/prometheus/prometheus.yaml"]
+    volumes:
+      - ./infra/otel/prometheus.yaml:/etc/prometheus/prometheus.yaml:ro
+      - prometheus_data:/prometheus
+    networks: [app]
+    depends_on:
+      otel-collector:
+        condition: service_started
+
+  grafana:
+    image: grafana/grafana:12.0.2
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-neurox_admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD}
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./infra/otel/grafana-datasources.yaml:/etc/grafana/provisioning/datasources/neurox.yaml:ro
+    ports: ["127.0.0.1:3001:3000"]
+    networks: [app]
+    depends_on:
+      prometheus:
+        condition: service_started
+      tempo:
+        condition: service_started
 
   api:
     <<: *api-image
@@ -250,6 +397,11 @@ services:
     command: ["python", "-m", "app.workers.notification"]
     depends_on: *worker-depends
 
+  sanctions-worker:
+    <<: *api-image
+    command: ["python", "-m", "app.workers.sanctions"]
+    depends_on: *worker-depends
+
   erp-worker:
     <<: *api-image
     command: ["python", "-m", "app.workers.erp"]
@@ -257,6 +409,8 @@ services:
       <<: *worker-depends
       mock-erp:
         condition: service_healthy
+      opa:
+        condition: service_started
 
   mock-erp:
     build:
@@ -280,7 +434,7 @@ services:
       dockerfile: apps/web/Dockerfile
       args:
         NEXT_PUBLIC_API_URL: http://localhost:8000/api/v1
-        NEXT_PUBLIC_AUTH_MODE: ${AUTH_MODE:-development}
+        NEXT_PUBLIC_AUTH_MODE: ${AUTH_MODE:-keycloak}
         NEXT_PUBLIC_KEYCLOAK_URL: http://localhost:8080
     image: neurox-web:local
     restart: unless-stopped
@@ -304,3 +458,7 @@ volumes:
   clamav_data:
   object_data:
   erp_data:
+  tempo_data:
+  prometheus_data:
+  grafana_data:
+  pgbackrest_spool:

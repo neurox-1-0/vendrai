@@ -16,19 +16,30 @@ processors:
         action: delete
       - key: http.request.body
         action: delete
+      - key: http.url
+        action: delete
+      - key: url.full
+        action: delete
+      - key: url.query
+        action: delete
       - key: gen_ai.prompt
         action: delete
 exporters:
   debug:
     verbosity: basic
+  otlphttp/tempo:
+    endpoint: http://tempo:4318
+    tls:
+      insecure: true
+  prometheus:
+    endpoint: 0.0.0.0:8889
 service:
   pipelines:
     traces:
       receivers: [otlp]
       processors: [memory_limiter, attributes/redact, batch]
-      exporters: [debug]
+      exporters: [debug, otlphttp/tempo]
     metrics:
       receivers: [otlp]
       processors: [memory_limiter, batch]
-      exporters: [debug]
-
+      exporters: [debug, prometheus]
