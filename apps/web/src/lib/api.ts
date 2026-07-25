@@ -33,6 +33,7 @@ export interface VendorCase {
   title: string;
   priority: "LOW" | "NORMAL" | "HIGH" | "URGENT";
   requester_user_id: string;
+  assigned_user_id: string | null;
   current_version: number;
   created_at: string;
   updated_at: string;
@@ -140,6 +141,71 @@ export interface InitiatedUpload {
   required_headers: Record<string, string>;
 }
 
+export interface CaseDocument {
+  document_id: string;
+  case_id: string;
+  original_filename: string;
+  mime_type: string;
+  size_bytes: number;
+  sha256: string | null;
+  malware_status: string;
+  processing_status: string;
+  created_at: string;
+}
+
+export interface DocumentPage {
+  page_id: string;
+  document_id: string;
+  page_number: number;
+  text_content: string | null;
+  layout_json: Record<string, unknown>;
+  ocr_confidence: number | null;
+}
+
+export interface ExtractedField {
+  extracted_field_id: string;
+  document_id: string;
+  field_name: string;
+  field_value_masked: string | null;
+  confidence: number | null;
+  source_page: number | null;
+  source_bbox: Record<string, unknown>;
+  extractor_type: string;
+  extractor_version: string | null;
+  human_verified: boolean;
+  updated_at: string;
+}
+
+export interface ClarificationTask {
+  clarification_task_id: string;
+  case_id: string;
+  run_id: string;
+  status: string;
+  questions: Array<{
+    question_id?: string;
+    text?: string;
+    field_name?: string;
+    requested_from_role?: string;
+  }>;
+  response: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface SanctionsImport {
+  sanctions_import_id: string;
+  source: string;
+  source_url: string;
+  status: string;
+  dataset_id: string | null;
+  etag: string | null;
+  sha256: string | null;
+  entity_count: number | null;
+  error_code: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+}
+
 export interface AcceptedAction {
   case_id: string;
   run_id: string | null;
@@ -154,7 +220,7 @@ const DEV_USER = process.env.NEXT_PUBLIC_DEV_USER_ID ?? "00000000-0000-0000-0000
 
 function requestHeaders(extra?: HeadersInit): Headers {
   const headers = new Headers(extra);
-  const token = typeof window !== "undefined" ? window.sessionStorage.getItem("neurox_access_token") : null;
+  const token = getAccessToken();
   if (token) {
     headers.set("Authorization", `Bearer ${token}`);
   } else if (process.env.NODE_ENV !== "production") {
@@ -185,6 +251,18 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return body as T;
 }
 
+async function requestBlob(path: string): Promise<Blob> {
+  const response = await fetch(`${API_BASE}${path}`, {
+    headers: requestHeaders(),
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    throw new Error(errorMessage(body, response.status));
+  }
+  return response.blob();
+}
+
 function idempotencyKey(prefix: string): string {
   return `${prefix}-${crypto.randomUUID()}`;
 }
@@ -194,6 +272,24 @@ export const api = {
   getCase: (caseId: string) => request<VendorCase>(`/cases/${caseId}`),
   getEvents: (caseId: string) => request<CaseEvent[]>(`/cases/${caseId}/events`),
   getEvidence: (caseId: string) => request<EvidencePacket>(`/cases/${caseId}/evidence`),
+  listCaseDocuments: (caseId: string) => request<CaseDocument[]>(`/cases/${caseId}/documents`),
+  listDocumentPages: (documentId: string) => request<DocumentPage[]>(`/documents/${documentId}/pages`),
+  listDocumentFields: (documentId: string) => request<ExtractedField[]>(`/documents/${documentId}/fields`),
+  downloadDocument: (documentId: string) => requestBlob(`/documents/${documentId}/content`),
+  correctDocumentField: (
+    documentId: string,
+    fieldId: string,
+    value: string,
+    reason: string,
+    expectedVersion: number,
+  ) => request<ExtractedField>(`/documents/${documentId}/fields/${fieldId}`, {
+    method: "PATCH",
+    headers: {
+      "Idempotency-Key": idempotencyKey("field-correction"),
+      "If-Match": String(expectedVersion),
+    },
+    body: JSON.stringify({ value, reason, expected_version: expectedVersion }),
+  }),
   subscribeRunEvents: async (runId: string, signal: AbortSignal, onEvent: (event: Record<string, unknown>) => void) => {
     let lastEventId = "";
     while (!signal.aborted) {
@@ -222,6 +318,14 @@ export const api = {
     }
   },
   listApprovals: () => request<ApprovalTask[]>("/approval-tasks"),
+  listReviews: () => request<ApprovalTask[]>("/review-tasks"),
+  listClarifications: () => request<ClarificationTask[]>("/clarification-tasks"),
+  requestSanctionsImport: (source: "OFAC" | "UN" | "EU") =>
+    request<SanctionsImport>("/admin/sanctions-imports", {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey(`sanctions-${source.toLowerCase()}`) },
+      body: JSON.stringify({ source }),
+    }),
   listNotifications: () => request<Notification[]>("/notifications"),
   createCase: (title: string, priority: VendorCase["priority"] = "NORMAL") =>
     request<VendorCase>("/cases", {
@@ -273,11 +377,35 @@ export const api = {
   submitCase: (caseId: string, expectedVersion: number) => request<AcceptedAction>(`/cases/${caseId}:submit`, {
     method: "POST", headers: { "Idempotency-Key": idempotencyKey("submit"), "If-Match": String(expectedVersion) },
   }),
+  claimCase: (caseId: string, expectedVersion: number) => request<VendorCase>(`/cases/${caseId}:claim`, {
+    method: "POST",
+    headers: { "Idempotency-Key": idempotencyKey("claim"), "If-Match": String(expectedVersion) },
+  }),
+  releaseCase: (caseId: string, expectedVersion: number) => request<VendorCase>(`/cases/${caseId}:release`, {
+    method: "POST",
+    headers: { "Idempotency-Key": idempotencyKey("release"), "If-Match": String(expectedVersion) },
+  }),
   decideApproval: (task: ApprovalTask, decision: "APPROVED" | "REJECTED", comment: string) =>
-    request<ApprovalTask>(`/approval-tasks/${task.approval_task_id}/decisions`, {
+    request<ApprovalTask>(`/${task.task_type.endsWith("_REVIEW") ? "review-tasks" : "approval-tasks"}/${task.approval_task_id}/decisions`, {
       method: "POST",
       headers: { "Idempotency-Key": idempotencyKey("approval"), "If-Match": String(task.case_version) },
       body: JSON.stringify({ decision, comment: comment || null, expected_version: task.case_version, evidence_hash: task.evidence_hash, edited_payload: {} }),
     }),
-  markNotificationRead: (notificationId: string) => request<Notification>(`/notifications/${notificationId}:read`, { method: "POST" }),
+  respondToClarification: (
+    task: ClarificationTask,
+    answers: Record<string, string>,
+    expectedVersion: number,
+  ) => request(`/clarification-tasks/${task.clarification_task_id}/responses`, {
+    method: "POST",
+    headers: {
+      "Idempotency-Key": idempotencyKey("clarification"),
+      "If-Match": String(expectedVersion),
+    },
+    body: JSON.stringify({ answers, expected_version: expectedVersion }),
+  }),
+  markNotificationRead: (notificationId: string) => request<Notification>(`/notifications/${notificationId}:read`, {
+    method: "POST",
+    headers: { "Idempotency-Key": idempotencyKey("notification-read") },
+  }),
 };
+import { getAccessToken } from "@/lib/auth-token";

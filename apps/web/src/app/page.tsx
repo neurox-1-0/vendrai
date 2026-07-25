@@ -1,22 +1,48 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Bell, Clock3, FileText, Search, ShieldCheck } from "lucide-react";
-import { api, type VendorCase } from "@/lib/api";
+import { useGetWorkQueueApiV1WorkQueueGet } from "@/generated/neurox";
+import type { WorkQueueItem } from "@/generated/models";
+import { api } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { StatusChip } from "@/components/status-chip";
 
 const terminal = new Set(["COMPLETED", "REJECTED", "FAILED", "CANCELLED"]);
+const defaultFilters = {
+  status: "",
+  caseType: "",
+  priority: "",
+  ownership: "ALL",
+};
 
 export default function Dashboard() {
   const [search, setSearch] = useState("");
   const [showNotifications, setShowNotifications] = useState(false);
+  const [filters, setFilters] = useState(() => {
+    if (typeof window === "undefined") return defaultFilters;
+    const saved = window.localStorage.getItem("neurox-work-queue-filters");
+    if (!saved) return defaultFilters;
+    try {
+      return {
+        ...defaultFilters,
+        ...JSON.parse(saved) as Partial<typeof defaultFilters>,
+      };
+    } catch {
+      return defaultFilters;
+    }
+  });
   const queryClient = useQueryClient();
-  const cases = useQuery({ queryKey: ["cases"], queryFn: api.listCases });
+  const cases = useGetWorkQueueApiV1WorkQueueGet({
+    status: filters.status || undefined,
+    case_type: filters.caseType || undefined,
+    priority: filters.priority || undefined,
+    ownership: filters.ownership,
+  });
   const notifications = useQuery({ queryKey: ["notifications"], queryFn: api.listNotifications });
   const markRead = useMutation({
     mutationFn: api.markNotificationRead,
@@ -32,6 +58,9 @@ export default function Dashboard() {
   const approvals = filtered.filter((item) => item.status === "APPROVAL_PENDING").length;
   const blocked = filtered.filter((item) => ["NEEDS_CLARIFICATION", "RISK_REVIEW", "DUPLICATE_REVIEW", "VERIFICATION_FAILED", "ERP_SYNC_FAILED"].includes(item.status)).length;
   const unread = (notifications.data ?? []).filter((item) => !item.read_at).length;
+  useEffect(() => {
+    window.localStorage.setItem("neurox-work-queue-filters", JSON.stringify(filters));
+  }, [filters]);
 
   return (
     <div className="min-h-full p-6 lg:p-12">
@@ -70,7 +99,7 @@ export default function Dashboard() {
         </div>
       </header>
 
-      {cases.isError && <div role="alert" className="mb-8 rounded-2xl border border-red-300 bg-red-50 p-4 text-red-900">Unable to load cases: {cases.error.message}</div>}
+      {cases.isError && <div role="alert" className="mb-8 rounded-2xl border border-red-300 bg-red-50 p-4 text-red-900">Unable to load the work queue. Check your role and integration health.</div>}
 
       <section className="mb-10 grid grid-cols-1 gap-6 sm:grid-cols-3" aria-label="Case metrics">
         {[
@@ -91,11 +120,62 @@ export default function Dashboard() {
         <div className="border-b border-white/40 p-6">
           <h2 className="font-display text-xl font-bold">Case work queue</h2>
           <p className="mt-1 text-sm text-[var(--color-muted)]">Status, ownership age and safe next action are sourced from the API.</p>
+          <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-5" aria-label="Saved work queue filters">
+            <select
+              aria-label="Case type"
+              value={filters.caseType}
+              onChange={(event) => setFilters((current) => ({ ...current, caseType: event.target.value }))}
+              className="h-11 rounded-xl bg-white/60 px-3 text-sm shadow-[var(--shadow-inset-sm)]"
+            >
+              <option value="">All case types</option>
+              <option value="VENDOR_ONBOARDING">Supplier onboarding</option>
+              <option value="INVOICE_EXCEPTION">Invoice exception</option>
+            </select>
+            <select
+              aria-label="Status"
+              value={filters.status}
+              onChange={(event) => setFilters((current) => ({ ...current, status: event.target.value }))}
+              className="h-11 rounded-xl bg-white/60 px-3 text-sm shadow-[var(--shadow-inset-sm)]"
+            >
+              <option value="">All statuses</option>
+              <option value="NEEDS_CLARIFICATION">Needs clarification</option>
+              <option value="DUPLICATE_REVIEW">Duplicate review</option>
+              <option value="RISK_REVIEW">Risk review</option>
+              <option value="APPROVAL_PENDING">Approval pending</option>
+              <option value="ERP_SYNC_FAILED">ERP retry</option>
+              <option value="COMPLETED">Completed</option>
+            </select>
+            <select
+              aria-label="Priority"
+              value={filters.priority}
+              onChange={(event) => setFilters((current) => ({ ...current, priority: event.target.value }))}
+              className="h-11 rounded-xl bg-white/60 px-3 text-sm shadow-[var(--shadow-inset-sm)]"
+            >
+              <option value="">All priorities</option>
+              <option value="URGENT">Urgent</option>
+              <option value="HIGH">High</option>
+              <option value="NORMAL">Normal</option>
+              <option value="LOW">Low</option>
+            </select>
+            <select
+              aria-label="Ownership"
+              value={filters.ownership}
+              onChange={(event) => setFilters((current) => ({ ...current, ownership: event.target.value }))}
+              className="h-11 rounded-xl bg-white/60 px-3 text-sm shadow-[var(--shadow-inset-sm)]"
+            >
+              <option value="ALL">All ownership</option>
+              <option value="MINE">Mine</option>
+              <option value="UNCLAIMED">Unclaimed</option>
+            </select>
+            <Button type="button" variant="secondary" onClick={() => setFilters(defaultFilters)}>
+              Reset saved view
+            </Button>
+          </div>
         </div>
         <div className="divide-y divide-white/40">
           {cases.isLoading && <p className="p-6" aria-live="polite">Loading live cases…</p>}
           {!cases.isLoading && filtered.length === 0 && <p className="p-6 text-[var(--color-muted)]">No supplier cases match this view.</p>}
-          {filtered.map((item: VendorCase) => (
+          {filtered.map((item: WorkQueueItem) => (
             <Link key={item.case_id} href={`/cases/${item.case_id}`} className="grid gap-3 p-6 transition-colors hover:bg-white/20 md:grid-cols-[1.3fr_1fr_auto] md:items-center">
               <div>
                 <p className="text-xs font-bold text-[var(--color-muted)]">{item.case_number}</p>
@@ -103,7 +183,7 @@ export default function Dashboard() {
               </div>
               <div className="text-sm text-[var(--color-muted)]">
                 <p>{item.priority} priority</p>
-                <p>Updated {new Date(item.updated_at).toLocaleString()}</p>
+                <p>{item.ownership.toLowerCase()} · {Math.max(1, Math.round(item.age_seconds / 3600))}h old</p>
               </div>
               <StatusChip status={item.status} />
             </Link>
