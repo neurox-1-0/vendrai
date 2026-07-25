@@ -9,23 +9,22 @@ import argparse
 import asyncio
 import csv
 import hashlib
+import io
 import uuid
 from pathlib import Path
-
-from sqlalchemy import delete, select
 
 from app.domain.security import normalize_vendor_name
 from app.models import SanctionsDataset, SanctionsEntityRecord
 from app.workers.database import WorkerSession
+from sqlalchemy import delete, select
 
 
 async def load(source: str, version: str, source_url: str, path: Path, expected_sha256: str) -> None:
-    payload = path.read_bytes()
+    payload = await asyncio.to_thread(path.read_bytes)
     actual = hashlib.sha256(payload).hexdigest()
     if actual != expected_sha256.lower():
         raise SystemExit(f"Checksum mismatch: expected {expected_sha256}, got {actual}")
-    with path.open(newline="", encoding="utf-8-sig") as handle:
-        rows = list(csv.DictReader(handle))
+    rows = list(csv.DictReader(io.StringIO(payload.decode("utf-8-sig"), newline="")))
     required = {"external_id", "name", "aliases", "countries"}
     if not rows or not required.issubset(rows[0]):
         raise SystemExit(f"CSV must contain {sorted(required)}")

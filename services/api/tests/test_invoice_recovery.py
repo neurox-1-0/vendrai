@@ -1,10 +1,7 @@
-from decimal import Decimal
 import uuid
+from decimal import Decimal
 
 import pytest
-from httpx import ASGITransport, AsyncClient
-from sqlalchemy import select
-
 from app.config import settings
 from app.database import AsyncSessionLocal
 from app.domain.cases import CaseStatus, InvalidTransition, assert_transition
@@ -16,6 +13,8 @@ from app.workers.invoice_agent import (
     detect_document_type,
     extract_invoice_from_text,
 )
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy import select
 
 
 @pytest.mark.asyncio
@@ -217,8 +216,15 @@ def test_three_way_match_requires_grn_and_preserves_signed_variances():
     assert line["match_status"] == "PARTIAL_MATCH"
 
 
-def test_duplicate_and_hold_states_require_explicit_approval_transition():
-    assert_transition(CaseStatus.BLOCKED_DUPLICATE, CaseStatus.APPROVED)
-    assert_transition(CaseStatus.HOLD, CaseStatus.APPROVED)
+def test_control_review_must_precede_separate_final_approval():
+    assert_transition(
+        CaseStatus.BLOCKED_DUPLICATE,
+        CaseStatus.APPROVAL_PENDING,
+    )
+    assert_transition(CaseStatus.HOLD, CaseStatus.APPROVAL_PENDING)
+    with pytest.raises(InvalidTransition):
+        assert_transition(CaseStatus.BLOCKED_DUPLICATE, CaseStatus.APPROVED)
+    with pytest.raises(InvalidTransition):
+        assert_transition(CaseStatus.HOLD, CaseStatus.APPROVED)
     with pytest.raises(InvalidTransition):
         assert_transition(CaseStatus.BLOCKED_DUPLICATE, CaseStatus.COMPLETED)

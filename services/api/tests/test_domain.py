@@ -1,8 +1,8 @@
 import pytest
-
 from app.domain.cases import CaseStatus, InvalidTransition, assert_transition
 from app.domain.security import blind_index, canonical_hash, normalize_vendor_name
 from app.services.storage import sanitize_filename, validate_upload_request
+from fastapi import HTTPException
 
 
 def test_case_state_machine_allows_only_declared_edges():
@@ -22,6 +22,7 @@ def test_canonical_hash_ignores_mapping_order():
 
 
 def test_upload_validation_rejects_dangerous_types():
-    with pytest.raises(Exception):
+    with pytest.raises(HTTPException) as exc_info:
         validate_upload_request("application/zip", 100)
+    assert exc_info.value.status_code == 415
     assert sanitize_filename("../../Tax Form 2026.pdf") == "Tax_Form_2026.pdf"
