@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { StatusChip } from "@/components/status-chip";
 import { CaseClarification } from "@/components/case-clarification";
 import { CaseDocumentReview } from "@/components/case-document-review";
+import { AgentExecutionMap } from "@/components/agent-execution-map";
 
 export default function CaseDetail() {
   const caseId = String(useParams().id);
@@ -41,6 +42,7 @@ export default function CaseDetail() {
       queryClient.invalidateQueries({ queryKey: ["reviews"] });
       queryClient.invalidateQueries({ queryKey: ["clarifications"] });
       queryClient.invalidateQueries({ queryKey: ["documents", caseId] });
+      queryClient.invalidateQueries({ queryKey: ["run-graph", runId] });
     }).catch((error) => {
       if (!controller.signal.aborted) console.error("SSE connection failed", error);
     });
@@ -123,9 +125,10 @@ export default function CaseDetail() {
 
       <div className="grid gap-8 xl:grid-cols-[1.25fr_1fr]">
         <div className="space-y-8">
+          {runId && <AgentExecutionMap runId={runId} />}
           <CaseClarification caseId={caseId} caseVersion={currentCase.current_version} />
           <CaseDocumentReview caseId={caseId} caseVersion={currentCase.current_version} />
-          <Card>
+          <Card data-tour-id="case.events">
             <div className="mb-6 flex items-center gap-3"><FileSearch className="h-6 w-6 text-[var(--color-accent)]" /><h2 className="font-display text-xl font-bold">Observable workflow events</h2></div>
             <ol className="space-y-5">
               {(events.data ?? []).map((event) => (
@@ -140,7 +143,7 @@ export default function CaseDetail() {
               {!events.isLoading && (events.data ?? []).length === 0 && <li className="text-sm text-[var(--color-muted)]">No workflow events have been recorded.</li>}
             </ol>
           </Card>
-          <Card>
+          <Card data-tour-id="case.evidence">
             <div className="mb-6 flex items-center gap-3"><ShieldAlert className="h-6 w-6 text-[var(--color-accent)]" /><h2 className="font-display text-xl font-bold">Evidence and explanations</h2></div>
             <div className="space-y-4">
               {(evidence.data?.items ?? []).map((item) => (
@@ -264,7 +267,7 @@ export default function CaseDetail() {
         </div>
 
         <aside className="space-y-8">
-          <Card>
+          <Card data-tour-id="case.decision-control">
             <h2 className="font-display text-xl font-bold">Decision control</h2>
             {task ? (
               <>

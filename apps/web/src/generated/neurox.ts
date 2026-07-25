@@ -26,6 +26,7 @@ import type {
 
 import type {
   ActionAccepted,
+  AgentStepResponse,
   ApprovalDecisionRequest,
   ApprovalTaskResponse,
   AuditExportResponse,
@@ -34,6 +35,12 @@ import type {
   CaseResponse,
   ClarificationResponseRequest,
   ClarificationTaskResponse,
+  CopilotFeedbackRequest,
+  CopilotFeedbackResponse,
+  CopilotMessageRequest,
+  CopilotMessageResponse,
+  CopilotSessionCreate,
+  CopilotSessionResponse,
   DocumentPageResponse,
   DocumentResponse,
   EventResponse,
@@ -53,6 +60,8 @@ import type {
   NotificationResponse,
   PolicyResponse,
   PolicyUploadRequest,
+  RunDiagnosticsResponse,
+  RunGraphResponse,
   RunResponse,
   SanctionsDatasetResponse,
   SanctionsImportRequest,
@@ -2216,6 +2225,423 @@ export const useRespondApiV1ClarificationTasksTaskIdResponsesPost = <TError = HT
       return useMutation(getRespondApiV1ClarificationTasksTaskIdResponsesPostMutationOptions(options), queryClient);
     }
 
+export const getListFeedbackApiV1CopilotFeedbackGetUrl = () => {
+
+
+
+
+  return `/api/v1/copilot/feedback`
+}
+
+/**
+ * @summary List Feedback
+ */
+export const listFeedbackApiV1CopilotFeedbackGet = async ( options?: RequestInit): Promise<CopilotFeedbackResponse[]> => {
+
+  return generatedClient<CopilotFeedbackResponse[]>(getListFeedbackApiV1CopilotFeedbackGetUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListFeedbackApiV1CopilotFeedbackGetQueryKey = () => {
+    return [
+    `/api/v1/copilot/feedback`
+    ] as const;
+    }
+
+
+export const getListFeedbackApiV1CopilotFeedbackGetQueryOptions = <TData = Awaited<ReturnType<typeof listFeedbackApiV1CopilotFeedbackGet>>, TError = HTTPValidationError>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listFeedbackApiV1CopilotFeedbackGet>>, TError, TData>>, request?: SecondParameter<typeof generatedClient>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListFeedbackApiV1CopilotFeedbackGetQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listFeedbackApiV1CopilotFeedbackGet>>> = ({ signal }) => listFeedbackApiV1CopilotFeedbackGet({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listFeedbackApiV1CopilotFeedbackGet>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListFeedbackApiV1CopilotFeedbackGetQueryResult = NonNullable<Awaited<ReturnType<typeof listFeedbackApiV1CopilotFeedbackGet>>>
+export type ListFeedbackApiV1CopilotFeedbackGetQueryError = HTTPValidationError
+
+
+export function useListFeedbackApiV1CopilotFeedbackGet<TData = Awaited<ReturnType<typeof listFeedbackApiV1CopilotFeedbackGet>>, TError = HTTPValidationError>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listFeedbackApiV1CopilotFeedbackGet>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listFeedbackApiV1CopilotFeedbackGet>>,
+          TError,
+          Awaited<ReturnType<typeof listFeedbackApiV1CopilotFeedbackGet>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof generatedClient>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListFeedbackApiV1CopilotFeedbackGet<TData = Awaited<ReturnType<typeof listFeedbackApiV1CopilotFeedbackGet>>, TError = HTTPValidationError>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listFeedbackApiV1CopilotFeedbackGet>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listFeedbackApiV1CopilotFeedbackGet>>,
+          TError,
+          Awaited<ReturnType<typeof listFeedbackApiV1CopilotFeedbackGet>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof generatedClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListFeedbackApiV1CopilotFeedbackGet<TData = Awaited<ReturnType<typeof listFeedbackApiV1CopilotFeedbackGet>>, TError = HTTPValidationError>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listFeedbackApiV1CopilotFeedbackGet>>, TError, TData>>, request?: SecondParameter<typeof generatedClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary List Feedback
+ */
+
+export function useListFeedbackApiV1CopilotFeedbackGet<TData = Awaited<ReturnType<typeof listFeedbackApiV1CopilotFeedbackGet>>, TError = HTTPValidationError>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listFeedbackApiV1CopilotFeedbackGet>>, TError, TData>>, request?: SecondParameter<typeof generatedClient>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListFeedbackApiV1CopilotFeedbackGetQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCreateFeedbackApiV1CopilotMessagesMessageIdFeedbackPostUrl = (messageId: string,) => {
+
+
+
+
+  return `/api/v1/copilot/messages/${messageId}/feedback`
+}
+
+/**
+ * @summary Create Feedback
+ */
+export const createFeedbackApiV1CopilotMessagesMessageIdFeedbackPost = async (messageId: string,
+    copilotFeedbackRequest: CopilotFeedbackRequest, options?: RequestInit): Promise<CopilotFeedbackResponse> => {
+
+  return generatedClient<CopilotFeedbackResponse>(getCreateFeedbackApiV1CopilotMessagesMessageIdFeedbackPostUrl(messageId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(copilotFeedbackRequest)
+  }
+);}
+
+
+
+
+
+export const getCreateFeedbackApiV1CopilotMessagesMessageIdFeedbackPostMutationOptions = <TError = HTTPValidationError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createFeedbackApiV1CopilotMessagesMessageIdFeedbackPost>>, TError,{messageId: string;data: CopilotFeedbackRequest}, TContext>, request?: SecondParameter<typeof generatedClient>}
+): UseMutationOptions<Awaited<ReturnType<typeof createFeedbackApiV1CopilotMessagesMessageIdFeedbackPost>>, TError,{messageId: string;data: CopilotFeedbackRequest}, TContext> => {
+
+const mutationKey = ['createFeedbackApiV1CopilotMessagesMessageIdFeedbackPost'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createFeedbackApiV1CopilotMessagesMessageIdFeedbackPost>>, {messageId: string;data: CopilotFeedbackRequest}> = (props) => {
+          const {messageId,data} = props ?? {};
+
+          return  createFeedbackApiV1CopilotMessagesMessageIdFeedbackPost(messageId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateFeedbackApiV1CopilotMessagesMessageIdFeedbackPostMutationResult = NonNullable<Awaited<ReturnType<typeof createFeedbackApiV1CopilotMessagesMessageIdFeedbackPost>>>
+    export type CreateFeedbackApiV1CopilotMessagesMessageIdFeedbackPostMutationBody = CopilotFeedbackRequest
+    export type CreateFeedbackApiV1CopilotMessagesMessageIdFeedbackPostMutationError = HTTPValidationError
+
+    /**
+ * @summary Create Feedback
+ */
+export const useCreateFeedbackApiV1CopilotMessagesMessageIdFeedbackPost = <TError = HTTPValidationError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createFeedbackApiV1CopilotMessagesMessageIdFeedbackPost>>, TError,{messageId: string;data: CopilotFeedbackRequest}, TContext>, request?: SecondParameter<typeof generatedClient>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createFeedbackApiV1CopilotMessagesMessageIdFeedbackPost>>,
+        TError,
+        {messageId: string;data: CopilotFeedbackRequest},
+        TContext
+      > => {
+      return useMutation(getCreateFeedbackApiV1CopilotMessagesMessageIdFeedbackPostMutationOptions(options), queryClient);
+    }
+
+export const getCreateSessionApiV1CopilotSessionsPostUrl = () => {
+
+
+
+
+  return `/api/v1/copilot/sessions`
+}
+
+/**
+ * @summary Create Session
+ */
+export const createSessionApiV1CopilotSessionsPost = async (copilotSessionCreate: CopilotSessionCreate, options?: RequestInit): Promise<CopilotSessionResponse> => {
+
+  return generatedClient<CopilotSessionResponse>(getCreateSessionApiV1CopilotSessionsPostUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(copilotSessionCreate)
+  }
+);}
+
+
+
+
+
+export const getCreateSessionApiV1CopilotSessionsPostMutationOptions = <TError = HTTPValidationError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createSessionApiV1CopilotSessionsPost>>, TError,{data: CopilotSessionCreate}, TContext>, request?: SecondParameter<typeof generatedClient>}
+): UseMutationOptions<Awaited<ReturnType<typeof createSessionApiV1CopilotSessionsPost>>, TError,{data: CopilotSessionCreate}, TContext> => {
+
+const mutationKey = ['createSessionApiV1CopilotSessionsPost'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createSessionApiV1CopilotSessionsPost>>, {data: CopilotSessionCreate}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createSessionApiV1CopilotSessionsPost(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateSessionApiV1CopilotSessionsPostMutationResult = NonNullable<Awaited<ReturnType<typeof createSessionApiV1CopilotSessionsPost>>>
+    export type CreateSessionApiV1CopilotSessionsPostMutationBody = CopilotSessionCreate
+    export type CreateSessionApiV1CopilotSessionsPostMutationError = HTTPValidationError
+
+    /**
+ * @summary Create Session
+ */
+export const useCreateSessionApiV1CopilotSessionsPost = <TError = HTTPValidationError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createSessionApiV1CopilotSessionsPost>>, TError,{data: CopilotSessionCreate}, TContext>, request?: SecondParameter<typeof generatedClient>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createSessionApiV1CopilotSessionsPost>>,
+        TError,
+        {data: CopilotSessionCreate},
+        TContext
+      > => {
+      return useMutation(getCreateSessionApiV1CopilotSessionsPostMutationOptions(options), queryClient);
+    }
+
+export const getListMessagesApiV1CopilotSessionsSessionIdMessagesGetUrl = (sessionId: string,) => {
+
+
+
+
+  return `/api/v1/copilot/sessions/${sessionId}/messages`
+}
+
+/**
+ * @summary List Messages
+ */
+export const listMessagesApiV1CopilotSessionsSessionIdMessagesGet = async (sessionId: string, options?: RequestInit): Promise<CopilotMessageResponse[]> => {
+
+  return generatedClient<CopilotMessageResponse[]>(getListMessagesApiV1CopilotSessionsSessionIdMessagesGetUrl(sessionId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListMessagesApiV1CopilotSessionsSessionIdMessagesGetQueryKey = (sessionId: string,) => {
+    return [
+    `/api/v1/copilot/sessions/${sessionId}/messages`
+    ] as const;
+    }
+
+
+export const getListMessagesApiV1CopilotSessionsSessionIdMessagesGetQueryOptions = <TData = Awaited<ReturnType<typeof listMessagesApiV1CopilotSessionsSessionIdMessagesGet>>, TError = HTTPValidationError>(sessionId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listMessagesApiV1CopilotSessionsSessionIdMessagesGet>>, TError, TData>>, request?: SecondParameter<typeof generatedClient>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListMessagesApiV1CopilotSessionsSessionIdMessagesGetQueryKey(sessionId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listMessagesApiV1CopilotSessionsSessionIdMessagesGet>>> = ({ signal }) => listMessagesApiV1CopilotSessionsSessionIdMessagesGet(sessionId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: sessionId !== null && sessionId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listMessagesApiV1CopilotSessionsSessionIdMessagesGet>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListMessagesApiV1CopilotSessionsSessionIdMessagesGetQueryResult = NonNullable<Awaited<ReturnType<typeof listMessagesApiV1CopilotSessionsSessionIdMessagesGet>>>
+export type ListMessagesApiV1CopilotSessionsSessionIdMessagesGetQueryError = HTTPValidationError
+
+
+export function useListMessagesApiV1CopilotSessionsSessionIdMessagesGet<TData = Awaited<ReturnType<typeof listMessagesApiV1CopilotSessionsSessionIdMessagesGet>>, TError = HTTPValidationError>(
+ sessionId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listMessagesApiV1CopilotSessionsSessionIdMessagesGet>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listMessagesApiV1CopilotSessionsSessionIdMessagesGet>>,
+          TError,
+          Awaited<ReturnType<typeof listMessagesApiV1CopilotSessionsSessionIdMessagesGet>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof generatedClient>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListMessagesApiV1CopilotSessionsSessionIdMessagesGet<TData = Awaited<ReturnType<typeof listMessagesApiV1CopilotSessionsSessionIdMessagesGet>>, TError = HTTPValidationError>(
+ sessionId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listMessagesApiV1CopilotSessionsSessionIdMessagesGet>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listMessagesApiV1CopilotSessionsSessionIdMessagesGet>>,
+          TError,
+          Awaited<ReturnType<typeof listMessagesApiV1CopilotSessionsSessionIdMessagesGet>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof generatedClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListMessagesApiV1CopilotSessionsSessionIdMessagesGet<TData = Awaited<ReturnType<typeof listMessagesApiV1CopilotSessionsSessionIdMessagesGet>>, TError = HTTPValidationError>(
+ sessionId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listMessagesApiV1CopilotSessionsSessionIdMessagesGet>>, TError, TData>>, request?: SecondParameter<typeof generatedClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary List Messages
+ */
+
+export function useListMessagesApiV1CopilotSessionsSessionIdMessagesGet<TData = Awaited<ReturnType<typeof listMessagesApiV1CopilotSessionsSessionIdMessagesGet>>, TError = HTTPValidationError>(
+ sessionId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listMessagesApiV1CopilotSessionsSessionIdMessagesGet>>, TError, TData>>, request?: SecondParameter<typeof generatedClient>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListMessagesApiV1CopilotSessionsSessionIdMessagesGetQueryOptions(sessionId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getSendMessageApiV1CopilotSessionsSessionIdMessagesPostUrl = (sessionId: string,) => {
+
+
+
+
+  return `/api/v1/copilot/sessions/${sessionId}/messages`
+}
+
+/**
+ * @summary Send Message
+ */
+export const sendMessageApiV1CopilotSessionsSessionIdMessagesPost = async (sessionId: string,
+    copilotMessageRequest: CopilotMessageRequest, options?: RequestInit): Promise<CopilotMessageResponse> => {
+
+  return generatedClient<CopilotMessageResponse>(getSendMessageApiV1CopilotSessionsSessionIdMessagesPostUrl(sessionId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(copilotMessageRequest)
+  }
+);}
+
+
+
+
+
+export const getSendMessageApiV1CopilotSessionsSessionIdMessagesPostMutationOptions = <TError = HTTPValidationError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof sendMessageApiV1CopilotSessionsSessionIdMessagesPost>>, TError,{sessionId: string;data: CopilotMessageRequest}, TContext>, request?: SecondParameter<typeof generatedClient>}
+): UseMutationOptions<Awaited<ReturnType<typeof sendMessageApiV1CopilotSessionsSessionIdMessagesPost>>, TError,{sessionId: string;data: CopilotMessageRequest}, TContext> => {
+
+const mutationKey = ['sendMessageApiV1CopilotSessionsSessionIdMessagesPost'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof sendMessageApiV1CopilotSessionsSessionIdMessagesPost>>, {sessionId: string;data: CopilotMessageRequest}> = (props) => {
+          const {sessionId,data} = props ?? {};
+
+          return  sendMessageApiV1CopilotSessionsSessionIdMessagesPost(sessionId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SendMessageApiV1CopilotSessionsSessionIdMessagesPostMutationResult = NonNullable<Awaited<ReturnType<typeof sendMessageApiV1CopilotSessionsSessionIdMessagesPost>>>
+    export type SendMessageApiV1CopilotSessionsSessionIdMessagesPostMutationBody = CopilotMessageRequest
+    export type SendMessageApiV1CopilotSessionsSessionIdMessagesPostMutationError = HTTPValidationError
+
+    /**
+ * @summary Send Message
+ */
+export const useSendMessageApiV1CopilotSessionsSessionIdMessagesPost = <TError = HTTPValidationError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof sendMessageApiV1CopilotSessionsSessionIdMessagesPost>>, TError,{sessionId: string;data: CopilotMessageRequest}, TContext>, request?: SecondParameter<typeof generatedClient>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof sendMessageApiV1CopilotSessionsSessionIdMessagesPost>>,
+        TError,
+        {sessionId: string;data: CopilotMessageRequest},
+        TContext
+      > => {
+      return useMutation(getSendMessageApiV1CopilotSessionsSessionIdMessagesPostMutationOptions(options), queryClient);
+    }
+
 export const getGetDocumentApiV1DocumentsDocumentIdGetUrl = (documentId: string,) => {
 
 
@@ -3583,6 +4009,107 @@ export function useGetRunApiV1RunsRunIdGet<TData = Awaited<ReturnType<typeof get
 
 
 
+export const getGetRunDiagnosticsApiV1RunsRunIdDiagnosticsGetUrl = (runId: string,) => {
+
+
+
+
+  return `/api/v1/runs/${runId}/diagnostics`
+}
+
+/**
+ * @summary Get Run Diagnostics
+ */
+export const getRunDiagnosticsApiV1RunsRunIdDiagnosticsGet = async (runId: string, options?: RequestInit): Promise<RunDiagnosticsResponse> => {
+
+  return generatedClient<RunDiagnosticsResponse>(getGetRunDiagnosticsApiV1RunsRunIdDiagnosticsGetUrl(runId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetRunDiagnosticsApiV1RunsRunIdDiagnosticsGetQueryKey = (runId: string,) => {
+    return [
+    `/api/v1/runs/${runId}/diagnostics`
+    ] as const;
+    }
+
+
+export const getGetRunDiagnosticsApiV1RunsRunIdDiagnosticsGetQueryOptions = <TData = Awaited<ReturnType<typeof getRunDiagnosticsApiV1RunsRunIdDiagnosticsGet>>, TError = HTTPValidationError>(runId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getRunDiagnosticsApiV1RunsRunIdDiagnosticsGet>>, TError, TData>>, request?: SecondParameter<typeof generatedClient>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetRunDiagnosticsApiV1RunsRunIdDiagnosticsGetQueryKey(runId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getRunDiagnosticsApiV1RunsRunIdDiagnosticsGet>>> = ({ signal }) => getRunDiagnosticsApiV1RunsRunIdDiagnosticsGet(runId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: runId !== null && runId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getRunDiagnosticsApiV1RunsRunIdDiagnosticsGet>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetRunDiagnosticsApiV1RunsRunIdDiagnosticsGetQueryResult = NonNullable<Awaited<ReturnType<typeof getRunDiagnosticsApiV1RunsRunIdDiagnosticsGet>>>
+export type GetRunDiagnosticsApiV1RunsRunIdDiagnosticsGetQueryError = HTTPValidationError
+
+
+export function useGetRunDiagnosticsApiV1RunsRunIdDiagnosticsGet<TData = Awaited<ReturnType<typeof getRunDiagnosticsApiV1RunsRunIdDiagnosticsGet>>, TError = HTTPValidationError>(
+ runId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getRunDiagnosticsApiV1RunsRunIdDiagnosticsGet>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getRunDiagnosticsApiV1RunsRunIdDiagnosticsGet>>,
+          TError,
+          Awaited<ReturnType<typeof getRunDiagnosticsApiV1RunsRunIdDiagnosticsGet>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof generatedClient>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetRunDiagnosticsApiV1RunsRunIdDiagnosticsGet<TData = Awaited<ReturnType<typeof getRunDiagnosticsApiV1RunsRunIdDiagnosticsGet>>, TError = HTTPValidationError>(
+ runId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getRunDiagnosticsApiV1RunsRunIdDiagnosticsGet>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getRunDiagnosticsApiV1RunsRunIdDiagnosticsGet>>,
+          TError,
+          Awaited<ReturnType<typeof getRunDiagnosticsApiV1RunsRunIdDiagnosticsGet>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof generatedClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetRunDiagnosticsApiV1RunsRunIdDiagnosticsGet<TData = Awaited<ReturnType<typeof getRunDiagnosticsApiV1RunsRunIdDiagnosticsGet>>, TError = HTTPValidationError>(
+ runId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getRunDiagnosticsApiV1RunsRunIdDiagnosticsGet>>, TError, TData>>, request?: SecondParameter<typeof generatedClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Get Run Diagnostics
+ */
+
+export function useGetRunDiagnosticsApiV1RunsRunIdDiagnosticsGet<TData = Awaited<ReturnType<typeof getRunDiagnosticsApiV1RunsRunIdDiagnosticsGet>>, TError = HTTPValidationError>(
+ runId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getRunDiagnosticsApiV1RunsRunIdDiagnosticsGet>>, TError, TData>>, request?: SecondParameter<typeof generatedClient>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetRunDiagnosticsApiV1RunsRunIdDiagnosticsGetQueryOptions(runId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
 export const getStreamRunEventsApiV1RunsRunIdEventsGetUrl = (runId: string,) => {
 
 
@@ -3672,6 +4199,208 @@ export function useStreamRunEventsApiV1RunsRunIdEventsGet<TData = Awaited<Return
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
   const queryOptions = getStreamRunEventsApiV1RunsRunIdEventsGetQueryOptions(runId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetRunGraphApiV1RunsRunIdGraphGetUrl = (runId: string,) => {
+
+
+
+
+  return `/api/v1/runs/${runId}/graph`
+}
+
+/**
+ * @summary Get Run Graph
+ */
+export const getRunGraphApiV1RunsRunIdGraphGet = async (runId: string, options?: RequestInit): Promise<RunGraphResponse> => {
+
+  return generatedClient<RunGraphResponse>(getGetRunGraphApiV1RunsRunIdGraphGetUrl(runId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetRunGraphApiV1RunsRunIdGraphGetQueryKey = (runId: string,) => {
+    return [
+    `/api/v1/runs/${runId}/graph`
+    ] as const;
+    }
+
+
+export const getGetRunGraphApiV1RunsRunIdGraphGetQueryOptions = <TData = Awaited<ReturnType<typeof getRunGraphApiV1RunsRunIdGraphGet>>, TError = HTTPValidationError>(runId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getRunGraphApiV1RunsRunIdGraphGet>>, TError, TData>>, request?: SecondParameter<typeof generatedClient>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetRunGraphApiV1RunsRunIdGraphGetQueryKey(runId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getRunGraphApiV1RunsRunIdGraphGet>>> = ({ signal }) => getRunGraphApiV1RunsRunIdGraphGet(runId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: runId !== null && runId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getRunGraphApiV1RunsRunIdGraphGet>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetRunGraphApiV1RunsRunIdGraphGetQueryResult = NonNullable<Awaited<ReturnType<typeof getRunGraphApiV1RunsRunIdGraphGet>>>
+export type GetRunGraphApiV1RunsRunIdGraphGetQueryError = HTTPValidationError
+
+
+export function useGetRunGraphApiV1RunsRunIdGraphGet<TData = Awaited<ReturnType<typeof getRunGraphApiV1RunsRunIdGraphGet>>, TError = HTTPValidationError>(
+ runId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getRunGraphApiV1RunsRunIdGraphGet>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getRunGraphApiV1RunsRunIdGraphGet>>,
+          TError,
+          Awaited<ReturnType<typeof getRunGraphApiV1RunsRunIdGraphGet>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof generatedClient>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetRunGraphApiV1RunsRunIdGraphGet<TData = Awaited<ReturnType<typeof getRunGraphApiV1RunsRunIdGraphGet>>, TError = HTTPValidationError>(
+ runId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getRunGraphApiV1RunsRunIdGraphGet>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getRunGraphApiV1RunsRunIdGraphGet>>,
+          TError,
+          Awaited<ReturnType<typeof getRunGraphApiV1RunsRunIdGraphGet>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof generatedClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetRunGraphApiV1RunsRunIdGraphGet<TData = Awaited<ReturnType<typeof getRunGraphApiV1RunsRunIdGraphGet>>, TError = HTTPValidationError>(
+ runId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getRunGraphApiV1RunsRunIdGraphGet>>, TError, TData>>, request?: SecondParameter<typeof generatedClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Get Run Graph
+ */
+
+export function useGetRunGraphApiV1RunsRunIdGraphGet<TData = Awaited<ReturnType<typeof getRunGraphApiV1RunsRunIdGraphGet>>, TError = HTTPValidationError>(
+ runId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getRunGraphApiV1RunsRunIdGraphGet>>, TError, TData>>, request?: SecondParameter<typeof generatedClient>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetRunGraphApiV1RunsRunIdGraphGetQueryOptions(runId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetRunStepsApiV1RunsRunIdStepsGetUrl = (runId: string,) => {
+
+
+
+
+  return `/api/v1/runs/${runId}/steps`
+}
+
+/**
+ * @summary Get Run Steps
+ */
+export const getRunStepsApiV1RunsRunIdStepsGet = async (runId: string, options?: RequestInit): Promise<AgentStepResponse[]> => {
+
+  return generatedClient<AgentStepResponse[]>(getGetRunStepsApiV1RunsRunIdStepsGetUrl(runId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetRunStepsApiV1RunsRunIdStepsGetQueryKey = (runId: string,) => {
+    return [
+    `/api/v1/runs/${runId}/steps`
+    ] as const;
+    }
+
+
+export const getGetRunStepsApiV1RunsRunIdStepsGetQueryOptions = <TData = Awaited<ReturnType<typeof getRunStepsApiV1RunsRunIdStepsGet>>, TError = HTTPValidationError>(runId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getRunStepsApiV1RunsRunIdStepsGet>>, TError, TData>>, request?: SecondParameter<typeof generatedClient>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetRunStepsApiV1RunsRunIdStepsGetQueryKey(runId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getRunStepsApiV1RunsRunIdStepsGet>>> = ({ signal }) => getRunStepsApiV1RunsRunIdStepsGet(runId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: runId !== null && runId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getRunStepsApiV1RunsRunIdStepsGet>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetRunStepsApiV1RunsRunIdStepsGetQueryResult = NonNullable<Awaited<ReturnType<typeof getRunStepsApiV1RunsRunIdStepsGet>>>
+export type GetRunStepsApiV1RunsRunIdStepsGetQueryError = HTTPValidationError
+
+
+export function useGetRunStepsApiV1RunsRunIdStepsGet<TData = Awaited<ReturnType<typeof getRunStepsApiV1RunsRunIdStepsGet>>, TError = HTTPValidationError>(
+ runId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getRunStepsApiV1RunsRunIdStepsGet>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getRunStepsApiV1RunsRunIdStepsGet>>,
+          TError,
+          Awaited<ReturnType<typeof getRunStepsApiV1RunsRunIdStepsGet>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof generatedClient>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetRunStepsApiV1RunsRunIdStepsGet<TData = Awaited<ReturnType<typeof getRunStepsApiV1RunsRunIdStepsGet>>, TError = HTTPValidationError>(
+ runId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getRunStepsApiV1RunsRunIdStepsGet>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getRunStepsApiV1RunsRunIdStepsGet>>,
+          TError,
+          Awaited<ReturnType<typeof getRunStepsApiV1RunsRunIdStepsGet>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof generatedClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetRunStepsApiV1RunsRunIdStepsGet<TData = Awaited<ReturnType<typeof getRunStepsApiV1RunsRunIdStepsGet>>, TError = HTTPValidationError>(
+ runId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getRunStepsApiV1RunsRunIdStepsGet>>, TError, TData>>, request?: SecondParameter<typeof generatedClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Get Run Steps
+ */
+
+export function useGetRunStepsApiV1RunsRunIdStepsGet<TData = Awaited<ReturnType<typeof getRunStepsApiV1RunsRunIdStepsGet>>, TError = HTTPValidationError>(
+ runId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getRunStepsApiV1RunsRunIdStepsGet>>, TError, TData>>, request?: SecondParameter<typeof generatedClient>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetRunStepsApiV1RunsRunIdStepsGetQueryOptions(runId,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
