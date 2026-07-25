@@ -9,14 +9,21 @@ NeuroX currently contains an evidence-driven supplier-onboarding platform and a 
 - `outbox-relay`: atomic database-to-RabbitMQ event publication.
 - `document-worker`: quarantine, ClamAV, native PDF parsing, Docling/Tesseract/EasyOCR and local masking.
 - `retrieval-worker` / `retrieval-api`: local dense+sparse policy index, RRF and reranking.
-- `agent-worker`: deterministic duplicate/sanctions/policy aggregation and approval interruption.
-- `invoice-worker`: local extraction, PO/GRN matching, policy evidence and invoice approval interruption.
+- `agent-worker`: validated Gemini planning, failure-isolated parallel
+  duplicate/sanctions/policy investigation and durable approval interruption.
+- `invoice-worker`: validated planning, parallel PO/GRN/vendor retrieval,
+  deterministic matching, policy evidence and durable invoice approval.
 - `notification-worker`: independent in-app/email delivery and delayed retries.
 - `erp-worker` / `mock-erp`: evidence-bound, idempotent vendor creation.
 - `opa`: fail-closed authorization for every ERP write using state, evidence,
   version, segregation-of-duties and mandatory-review facts.
 
 PostgreSQL is authoritative. RabbitMQ quorum queues carry versioned events. Qdrant is a derived tenant-filtered policy index. Redis is limited to cache/coordination. Documents remain local.
+
+The case workspace includes a persisted execution map and sanitized judge
+diagnostics. The separate application copilot uses versioned procedural CAG and
+authorization-filtered case context; it can navigate or spotlight the product
+but has no workflow-mutation capability.
 
 ## Local setup
 
@@ -110,3 +117,10 @@ chat.
 ## Release truth
 
 See [CURRENT_STATUS.md](./CURRENT_STATUS.md) for evidence-backed state and [MASTER_TODO.md](./MASTER_TODO.md) for acceptance blockers. The implementation is not an enterprise release until the remaining integration, security, chaos, load and 100-case evaluation gates pass.
+
+## Competition product documents
+
+- [Competition product build plan](./docs/competition/COMPETITION_PRODUCT_BUILD_PLAN.md)
+- [Technical architecture and agent explainer](./docs/competition/TECHNICAL_ARCHITECTURE_AND_AGENT_EXPLAINER.md)
+- [Demo and buyer pitch guide](./docs/competition/DEMO_AND_BUYER_PITCH_GUIDE.md)
+- [Judges Q&A and gap register](./docs/competition/JUDGES_QA_AND_GAP_REGISTER.md)

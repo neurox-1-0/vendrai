@@ -3,6 +3,35 @@
 Only acceptance-test-backed work may move to `VERIFIED` in
 `CURRENT_STATUS.md`.
 
+## Competition delivery track
+
+The controlling competition sequence is
+[`docs/competition/COMPETITION_PRODUCT_BUILD_PLAN.md`](./docs/competition/COMPETITION_PRODUCT_BUILD_PLAN.md).
+Until the competition build passes, prioritize:
+
+1. A lean runnable demo profile.
+2. Live projection and durable reconciliation for the implemented dynamic,
+   failure-isolated specialist fan-out/fan-in.
+3. Complete supplier and invoice browser journeys.
+4. Execution-map, evidence, HITL, recovery, and diagnostic UX.
+5. The bounded application copilot and guided spotlight experience.
+6. Rehearsal, evaluation, security checks, and judge preparation.
+
+Do not add unrelated enterprise infrastructure before these gates are complete.
+
+## Competition capabilities implemented in the current working tree
+
+- [x] Add Gemini goal planning with an allowlisted capability registry,
+  prerequisite/dependency validation and visible planner failures.
+- [x] Execute eligible supplier and invoice specialists concurrently and retain
+  successful siblings when another specialist raises an exception.
+- [x] Persist real execution steps, rationale, dependencies, attempts, typed
+  failures, start/end times, critical path and parallel time saved.
+- [x] Add a case execution map and sanitized auditor/admin diagnostics drawer.
+- [x] Add a separate read-only copilot with masked tenant/user-scoped history,
+  versioned CAG, live authorized case context and allowlisted UI actions.
+- [x] Regenerate OpenAPI/Orval contracts and add copilot/graph contract tests.
+
 ## Implemented on `feature/p0-p1-enterprise-e2e`
 
 - [x] Rebuild the P0/P1 database model and reversible migration chain.
@@ -31,8 +60,11 @@ Only acceptance-test-backed work may move to `VERIFIED` in
 
 ## P0 — acceptance blockers before PR to `dev`
 
-- [ ] Owner: free at least 45–50 GB on the workstation, or explicitly authorize a
-  narrowly scoped Docker cleanup. Current free space is approximately 3.5 GB.
+- [ ] Owner: free at least 45–50 GB on the workstation. Current free space is
+  approximately 4.9 GB.
+- [ ] Owner: populate the missing `.env` service/database/Keycloak/MinIO/Grafana
+  secrets from `.env.example`; preserve the existing Gemini key and never
+  commit `.env`.
 - [ ] Launch `docker compose --profile acceptance up --build` with fresh volumes.
 - [ ] Pull the pinned OPA image, run `opa check`, and exercise allow/deny/outage
   decisions; the current Docker registry CDN DNS lookup failed.
@@ -50,6 +82,8 @@ Only acceptance-test-backed work may move to `VERIFIED` in
 - [ ] Enforce extraction F1, duplicate recall, exact identifier, Recall@10,
   citation precision, tenant isolation, ERP authorization and PII leakage thresholds.
 - [ ] Run Playwright journeys VO-001–VO-005 and AP-001–AP-007 with accessibility checks.
+- [ ] Make active specialist `RUNNING` states visible before the durable worker
+  transaction commits, then reconcile with persisted `AgentStep` records.
 - [ ] Run malicious PDF, prompt injection, SQL injection, forged/replayed decision,
   expired URL, unauthorized tool and audit-mutation security tests.
 - [ ] Run Gemini invalid key, quota, 429, invalid schema and outage recovery tests.
