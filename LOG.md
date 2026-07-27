@@ -10,6 +10,9 @@ unfinished gates remain in [`MASTER_TODO.md`](./MASTER_TODO.md).
 
 - The Gemini key exists in the uncommitted root `.env`; its value was never
   displayed.
+- Real external Gemini participation is enabled only for synthetic demo data:
+  `ALLOW_EXTERNAL_LLM=true`, `ALLOW_SYNTHETIC_LLM_DATA_ONLY=true`, and
+  `LLM_DATA_CLASSIFICATION=SYNTHETIC`.
 - Docker Desktop is running and can be inspected.
 - The Next.js frontend started successfully at `http://localhost:3000`.
 - Browser smoke checks passed for:
