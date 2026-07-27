@@ -1,4 +1,4 @@
-FROM postgres:16.9-bookworm
+FROM postgres:16.13-bookworm
 
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends pgbackrest \
