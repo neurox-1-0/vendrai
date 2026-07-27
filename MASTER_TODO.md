@@ -61,11 +61,14 @@ Do not add unrelated enterprise infrastructure before these gates are complete.
 
 ## P0 — acceptance blockers before PR to `dev`
 
-- [ ] Owner: free at least 45–50 GB on the workstation. Current free space is
-  approximately 4.9 GB.
-- [ ] Owner: populate the missing `.env` service/database/Keycloak/MinIO/Grafana
-  secrets from `.env.example`; preserve the existing Gemini key and never
-  commit `.env`.
+- [ ] Owner: free enough workstation space for the complete
+  OCR/model/security/observability build. Current free space is approximately
+  7.1 GB; 45–50 GB remains the safe acceptance target.
+- [x] Add a local environment bootstrap that preserves the Gemini key,
+  generates internal service/database/Keycloak/MinIO/Grafana secrets and never
+  commits `.env`.
+- [x] Execute the bootstrap and verify that the actual `.env` resolves the
+  Compose configuration without exposing secret values.
 - [ ] Launch `docker compose --profile acceptance up --build` with fresh volumes.
 - [ ] Pull the pinned OPA image, run `opa check`, and exercise allow/deny/outage
   decisions; the current Docker registry CDN DNS lookup failed.

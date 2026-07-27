@@ -54,17 +54,19 @@ prioritizes a dependable product experience over adding more infrastructure.
   PostgreSQL-checkpointed LangGraph owns bounded reasoning, verification, HITL
   and ERP confirmation. This is visible as one combined execution graph, but
   the specialist scheduler is not itself a LangGraph subgraph.
-- Specialist results are durable, but intermediate `RUNNING` step projections
-  are not yet committed while the long worker transaction is active. The UI
-  polls and updates when durable steps commit; true sub-step live streaming
-  remains a release gate.
+- Specialist results are durable. A short-lived, PII-free Redis projection now
+  exposes `RUNNING` and terminal sibling states while the long worker
+  transaction is active. The UI polls every two seconds, and matching
+  PostgreSQL `AgentStep` records replace projections after commit. Full browser
+  proof on the running Compose stack remains a release gate.
 - Neither workflow has passed a full live browser journey on the complete
   Compose stack.
 - The 100-case manifest exists, but the documents and numerical evaluation run
   are not complete.
-- The local `.env` is missing required service credentials and Docker access
-  could not be approved in the current Codex session. Approximately 4.9 GB is
-  free, still below the safe allowance for the OCR/model/observability stack.
+- Docker is available. The local bootstrap preserved the configured Gemini key
+  and generated every required internal Compose secret without printing or
+  committing them. Approximately 7.1 GB is free, still below the safe
+  allowance for the complete OCR/model/security/observability build.
 
 ## 3. Product boundaries
 

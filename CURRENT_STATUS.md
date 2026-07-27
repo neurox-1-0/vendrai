@@ -13,11 +13,14 @@ must not be merged to `dev` until the complete Compose acceptance profile,
 browser journeys, numerical evaluations, security/chaos/load tests and
 backup/restore drill pass.
 
-Local full-stack acceptance is currently `BLOCKED`: the workstation has only
-approximately 4.9 GB free, while the OCR/model/observability stack needs about
-50 GB of safe working space. The local `.env` also lacks the required
-service/database/Keycloak/MinIO/Grafana variables, and Docker daemon access
-could not be approved in the current Codex session. No broad or destructive
+Local full-stack acceptance is currently `BLOCKED`: the workstation has
+approximately 7.1 GB free, while the complete
+OCR/model/security/observability build needs substantially more safe working
+space. Docker Desktop is running and readable. The local bootstrap completed:
+the existing Gemini key was preserved and all required internal
+service/database/Keycloak/MinIO/Grafana secrets are now present in the ignored,
+permission-restricted `.env`. One legacy `vendortopay_db` prototype container
+is running, but the current application stack is not. No broad or destructive
 Docker cleanup was performed.
 
 ## P0/P1 capability ledger
@@ -57,10 +60,10 @@ Docker cleanup was performed.
 | OpenTelemetry/Tempo/Prometheus/Grafana profile | IMPLEMENTED | API/SQL/HTTP, outbox, broker, worker, retrieval and Gemini spans propagate W3C context; collector removes statements, bodies, prompts and URL queries. Live correlation/redaction inspection remains. |
 | Integration health view | IMPLEMENTED | Admin-only database, broker, Redis, storage, Qdrant, OCR, Gemini, sanctions, SMTP and ERP checks exist; full-stack validation remains. |
 | pgBackRest/WAL backup to isolated object storage | IMPLEMENTED | Encrypted repository configuration and restore runbook exist; RPO/RTO restore drill remains. |
-| Production-shaped Compose boundaries | IMPLEMENTED | `docker compose --env-file .env.example config --quiet` passes. The actual `.env` is incomplete; image pulls/build and clean launch are blocked by owner configuration, disk and unavailable Docker approval. |
+| Production-shaped Compose boundaries | IMPLEMENTED | Both example and actual `.env` Compose resolution pass. The local bootstrap preserved the Gemini key and generated internal service secrets. Image pulls/build and clean full-stack launch remain blocked by available disk space. |
 | CI lint/type/test/build/audit/SBOM/scan gates | IMPLEMENTED | Workflow is pinned to Python 3.12/Node 22.22 and includes migration, live RLS/checkpoint, contract drift, audits, SBOM, Trivy and gitleaks. A GitHub run has not yet executed for this branch. |
 | Reproducible 100-case evaluation corpus | IMPLEMENTED | Manifest contains exactly 50 supplier and 50 invoice synthetic scenarios with required adversarial categories. Documents, real-agent execution and numerical release thresholds remain. |
-| Browser, chaos, load, backup/restore and full security acceptance | BLOCKED | Requires approximately 50 GB free disk, a complete `.env`, Docker access and a clean running acceptance profile. The in-app browser also rejected local-site access in this session. |
+| Browser, chaos, load, backup/restore and full security acceptance | BLOCKED | Frontend-only browser smoke passed for the dashboard, supplier intake, invoice intake and copilot, including honest API-unavailable states. Full workflow browser acceptance still requires more free disk and a clean running Compose profile. |
 | VPS deployment | BLOCKED | Requires successful local acceptance plus VPS access, DNS and SMTP secrets from the owner. |
 
 ## Latest local verification
@@ -85,8 +88,10 @@ Docker cleanup was performed.
 - Real Gemini structured synthetic call: passed with `gemini-3.6-flash`.
 - Live official-source adapter smoke: OFAC and UN passed; EU is intentionally
   fail-closed until an approved official export URL is configured.
-- Visual browser acceptance: blocked by the browser local-site security setting;
-  no alternate browser workaround was attempted.
+- Frontend browser smoke: dashboard, supplier intake, invoice intake and
+  copilot render correctly with no browser console errors. Full workflow and
+  accessibility acceptance remains blocked because the API/workers are not
+  running.
 
 `IMPLEMENTED` never means production-verified. Only the evidence named above
 can move a capability to `VERIFIED`.

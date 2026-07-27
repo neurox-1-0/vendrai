@@ -137,10 +137,10 @@ not learn policy autonomously from chat.
 | Specialist scheduler is outside LangGraph | Medium | Validated I/O specialists run in a failure-isolated worker fan-out; reasoning/HITL/ERP are checkpointed LangGraph nodes | Explain and defend this deliberate boundary; optionally convert scheduler to a nested subgraph |
 | Copilot published-help RAG and promotion workflow | Medium | Versioned CAG, masked history, live case context and safe UI actions exist; controlled help publication is not yet built | Admin-reviewed help-pack version promotion and retrieval evaluation |
 | Two full browser workflows not accepted | Critical | Backend pieces exist; complete stack has not passed | Supplier and invoice journeys pass twice from fresh state |
-| Full local stack blocked | Critical | About 4.9 GB free, required `.env` service variables are absent, and Docker access approval was unavailable in this session | Generate local secrets, free disk and run clean Compose acceptance |
+| Full local stack blocked | Critical | About 7.1 GB free; Docker is available and a safe internal-secret bootstrap now exists, but the complete OCR/security/observability build needs more headroom | Free disk, run clean Compose acceptance and record actual image/volume usage |
 | ERP integration is a sandbox | High | Correct for competition, not a customer ERP | Honest labeling and live persistent operations |
 | Numerical evaluation incomplete | High | Manifest exists; corpus run does not | Recorded extraction, matching, retrieval, safety metrics |
-| UI polish not visually accepted | High | Lint/type/build pass; the in-app browser rejected local-site access | Responsive/accessibility browser review and judge rehearsal |
+| UI polish not fully accepted | High | Dashboard, both intake screens and copilot passed a live frontend smoke check with no console errors; backend-driven states could not be exercised | Responsive/accessibility review plus complete role-based workflow and judge rehearsal |
 | OPA image/runtime not locally accepted | High | Gateway tests pass; registry DNS blocked pull | Live allow/deny/outage test |
 | EU sanctions source not configured | High | Adapter fails closed | Approved source, checksum, timestamp, parser test |
 | Diagnostic trace correlation incomplete | Medium | Sanitized graph/versions/integrity drawer exists; live Tempo correlation still needs inspection | Trace-to-run evidence with redaction proof |
