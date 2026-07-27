@@ -7,14 +7,15 @@ Last updated: 2026-07-27
 
 ## Release truth
 
-`feature/p0-p1-enterprise-e2e` is a production-shaped P0/P1 implementation
-branch based on clean commit `1928fd0`. It is not yet an enterprise release and
-must not be merged to `dev` until the complete Compose acceptance profile,
-browser journeys, numerical evaluations, security/chaos/load tests and
-backup/restore drill pass.
+`dev` now contains the production-shaped P0/P1 implementation. The current
+`fix/ci-migrations-images` branch repairs the first GitHub CI failures and must
+be rerun before its PR is merged. The product is not yet an enterprise release:
+complete Compose acceptance, browser journeys, numerical evaluations,
+security/chaos/load tests and the backup/restore drill remain.
 
 Local full-stack acceptance is currently `BLOCKED`: the workstation has
-approximately 8.9 GB free and no NeuroX OCR/retrieval images cached. The
+approximately 3.5 GB free after targeted CI image reproduction and no complete
+NeuroX OCR/retrieval images cached. The
 functional product profile keeps Docling, Tesseract, EasyOCR, ClamAV and local
 retrieval models and therefore needs materially more safe Docker build
 headroom. Docker Desktop is running and readable. The local bootstrap completed:
@@ -28,7 +29,7 @@ Docker cleanup was performed.
 
 | Capability | Status | Evidence / remaining gate |
 |---|---|---|
-| Reversible Alembic schema and full SQLAlchemy model | IMPLEMENTED | PostgreSQL 16 downgrade to base and upgrade through `a066778899aa` passed previously. New copilot head `a1778899aabb` is reversible and linted but still needs the live PostgreSQL cycle. Alembic now normalizes async SQLite URLs for local migration tooling; LangGraph checkpoint JSONB remains PostgreSQL-specific by design. |
+| Reversible Alembic schema and full SQLAlchemy model | VERIFIED | Fresh PostgreSQL upgrade, downgrade to base and re-upgrade through copilot head `a1778899aabb` passed. Historical revisions now contain frozen Alembic operations and a regression test rejects mutable ORM `create_all`/`drop_all` calls. |
 | API, worker, relay, audit and migration database roles | VERIFIED | Live two-tenant tests prove cross-role grants and RLS isolation. |
 | Transaction-local tenant context | VERIFIED | Live non-superuser API/worker/audit/relay test passed; LangGraph checkpoint tables also use tenant-prefixed RLS. |
 | Keycloak OIDC, PKCE, RBAC and synthetic user bootstrap | IMPLEMENTED | Acceptance realm/client/bootstrap exist; live token, role and tenant tests require the full stack. |
@@ -62,14 +63,14 @@ Docker cleanup was performed.
 | Integration health view | IMPLEMENTED | Admin-only database, broker, Redis, storage, Qdrant, OCR, Gemini, sanctions, SMTP and ERP checks exist; full-stack validation remains. |
 | pgBackRest/WAL backup to isolated object storage | IMPLEMENTED | Encrypted repository configuration and restore runbook exist in the operations overlay; RPO/RTO restore drill remains. |
 | Production-shaped Compose boundaries | IMPLEMENTED | `product-up` contains every functional workflow dependency and `operations-up` adds telemetry/backup using the same images and source. Both actual `.env` configurations resolve, and the startup script warns about low disk without deleting data. Image pulls/build and clean full-stack launch remain blocked by available disk space. |
-| CI lint/type/test/build/audit/SBOM/scan gates | IMPLEMENTED | Workflow is pinned to Python 3.12/Node 22.22 and includes migration, live RLS/checkpoint, contract drift, audits, SBOM, Trivy and gitleaks. A GitHub run has not yet executed for this branch. |
+| CI lint/type/test/build/audit/SBOM/scan gates | IMPLEMENTED | The migration failure was reproduced and fixed; patched Python 3.12.13, PostgreSQL 16.13 and Node 22.23.1 bases replace stale vulnerable images. The mock-ERP final image passes the unchanged Trivy HIGH/CRITICAL gate, and the web Docker build now has safe defaults plus a package-manager-free runtime. A fresh GitHub run is still required for all six matrix images. |
 | Reproducible 100-case evaluation corpus | IMPLEMENTED | Manifest contains exactly 50 supplier and 50 invoice synthetic scenarios with required adversarial categories. Documents, real-agent execution and numerical release thresholds remain. |
 | Browser, chaos, load, backup/restore and full security acceptance | BLOCKED | Frontend-only browser smoke passed for the dashboard, supplier intake, invoice intake and copilot, including honest API-unavailable states. The improved semantic copilot UI passes lint, type and production build, but needs a running API browser journey. Full workflow acceptance still requires more free disk and a clean running product profile. |
 | VPS deployment | BLOCKED | Requires successful local acceptance plus VPS access, DNS and SMTP secrets from the owner. |
 
 ## Latest local verification
 
-- API/domain/contract tests: `77 passed, 2 skipped`; the skips are the separately
+- API/domain/contract tests: `78 passed, 2 skipped`; the skips are the separately
   executed live PostgreSQL integration tests.
 - Live PostgreSQL RLS/checkpoint integration: `2 passed`.
 - Alembic PostgreSQL 16 downgrade-to-base and re-upgrade-to-head: passed.

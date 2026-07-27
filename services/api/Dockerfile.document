@@ -1,4 +1,4 @@
-FROM python:3.12.4-slim-bookworm AS runtime
+FROM python:3.12.13-slim-bookworm AS runtime
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 EASYOCR_MODULE_PATH=/opt/easyocr
 WORKDIR /srv/api
 RUN apt-get update && apt-get install --yes --no-install-recommends tesseract-ocr libgl1 libglib2.0-0 && rm -rf /var/lib/apt/lists/*

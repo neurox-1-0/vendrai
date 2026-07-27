@@ -4,6 +4,45 @@ This is the concise chronological log requested by the project owner. Detailed
 acceptance evidence remains in [`CURRENT_STATUS.md`](./CURRENT_STATUS.md), and
 unfinished gates remain in [`MASTER_TODO.md`](./MASTER_TODO.md).
 
+## 2026-07-27 — CI migration and container-image recovery
+
+### Fixed
+
+- Replaced every historical Alembic `Base.metadata.create_all()` call with
+  frozen, revision-owned `op.create_table()` operations. Fresh databases no
+  longer create future copilot tables during the baseline/invoice revisions.
+- Added a regression test that rejects mutable `create_all`/`drop_all` calls in
+  migration history.
+- Updated Python runtime images from 3.12.4 to 3.12.13, PostgreSQL from 16.9 to
+  16.13 and Node from 22.22.0 to 22.23.1.
+- Added safe default frontend build arguments so the CI Docker build cannot
+  prerender with `new URL("")`.
+- Removed npm, Corepack and Yarn from the final Next.js standalone runtime.
+  They are needed only in the build stage and their bundled dependency trees
+  must not enlarge the production attack surface.
+
+### Verified
+
+- PostgreSQL upgrade to head, downgrade to base and re-upgrade to head: passed.
+- Live PostgreSQL checkpoint and two-tenant RLS suite: `2 passed`.
+- API/domain/contract suite: `78 passed, 2 skipped`.
+- Ruff and mypy: passed.
+- Frontend ESLint, TypeScript, production build and production dependency
+  audit: passed; npm reports `0 vulnerabilities`.
+- Compose configuration and whitespace checks: passed.
+- The old Python 3.12.4 mock-ERP image reproduced the CI gate with 48 fixable
+  OS findings. The rebuilt Python 3.12.13 image passed the identical Trivy
+  HIGH/CRITICAL threshold with zero findings.
+- The Node 22.23.1 OS layer is clean. Its bundled package managers contained
+  six findings, so they were removed from the final runtime layer.
+
+### Remaining CI gate
+
+- Push `fix/ci-migrations-images` and rerun GitHub Actions. The heavyweight
+  document/retrieval and PostgreSQL final-image scans must complete on the CI
+  runner. Local repetition stopped after Docker Desktop reached the
+  workstation disk ceiling; no application volumes were deleted.
+
 ## 2026-07-27 — product-first runtime and adaptive UI guidance
 
 ### Implemented

@@ -36,7 +36,7 @@ Do not add unrelated enterprise infrastructure before these gates are complete.
 - [x] Keep all functional services in `product-up`, while moving only
   telemetry dashboards and continuous WAL backup into `operations-up`.
 
-## Implemented on `feature/p0-p1-enterprise-e2e`
+## Implemented on `dev` plus the current CI-recovery branch
 
 - [x] Rebuild the P0/P1 database model and reversible migration chain.
 - [x] Add least-privilege database roles, transaction tenant context and RLS.
@@ -61,12 +61,15 @@ Do not add unrelated enterprise infrastructure before these gates are complete.
 - [x] Add a reproducible 100-case synthetic evaluation manifest.
 - [x] Add CI gates for lint, typing, tests, migrations, live RLS/checkpoints,
   contracts, dependency audits, SBOM, image scan and secret scan.
+- [x] Freeze historical Alembic revisions, add a mutable-metadata regression
+  test, patch stale runtime bases and repair the frontend container build.
 
 ## P0 — acceptance blockers before PR to `dev`
 
 - [ ] Owner: free enough workstation space for the complete
-  OCR/model/security product build. Current free space is approximately
-  8.9 GB with no NeuroX OCR/retrieval image cached. Allow 25–35 GB for the
+  OCR/model/security product build. Current free space fell to approximately
+  3.5 GB during CI image reproduction, with no complete NeuroX OCR/retrieval
+  image cached. Allow 25–35 GB for the
   product build; 45–50 GB remains the safe target for operations and repeated
   evaluation runs.
 - [x] Add a local environment bootstrap that preserves the Gemini key,
@@ -99,8 +102,10 @@ Do not add unrelated enterprise infrastructure before these gates are complete.
 - [ ] Run SMTP outage and ERP timeout/replay acceptance.
 - [ ] Run 10-concurrent-workflow latency/load profile.
 - [ ] Perform encrypted pgBackRest backup and isolated restore; record measured RPO/RTO.
-- [ ] Run the branch CI on GitHub and resolve every audit/scan/build result.
-- [ ] Open a PR from `feature/p0-p1-enterprise-e2e` into `dev` only after all gates above are green.
+- [ ] Push `fix/ci-migrations-images`, rerun GitHub CI and verify every
+  migration/build/SBOM/Trivy job. The known migration, stale-base and empty
+  frontend build-argument failures are fixed locally.
+- [ ] Open the CI-recovery PR into `dev` after the rerun is green.
 
 ## P1 — operational completion gates
 
