@@ -29,7 +29,8 @@ Do not add unrelated enterprise infrastructure before these gates are complete.
   failures, start/end times, critical path and parallel time saved.
 - [x] Add a case execution map and sanitized auditor/admin diagnostics drawer.
 - [x] Add a separate read-only copilot with masked tenant/user-scoped history,
-  versioned CAG, live authorized case context and allowlisted UI actions.
+  versioned CAG, live authorized case context, allowlisted UI actions and
+  versioned tenant-scoped feedback.
 - [x] Regenerate OpenAPI/Orval contracts and add copilot/graph contract tests.
 
 ## Implemented on `feature/p0-p1-enterprise-e2e`
@@ -82,7 +83,7 @@ Do not add unrelated enterprise infrastructure before these gates are complete.
 - [ ] Enforce extraction F1, duplicate recall, exact identifier, Recall@10,
   citation precision, tenant isolation, ERP authorization and PII leakage thresholds.
 - [ ] Run Playwright journeys VO-001–VO-005 and AP-001–AP-007 with accessibility checks.
-- [ ] Make active specialist `RUNNING` states visible before the durable worker
+- [x] Make active specialist `RUNNING` states visible before the durable worker
   transaction commits, then reconcile with persisted `AgentStep` records.
 - [ ] Run malicious PDF, prompt injection, SQL injection, forged/replayed decision,
   expired URL, unauthorized tool and audit-mutation security tests.

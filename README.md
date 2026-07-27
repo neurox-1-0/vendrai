@@ -18,7 +18,10 @@ NeuroX currently contains an evidence-driven supplier-onboarding platform and a 
 - `opa`: fail-closed authorization for every ERP write using state, evidence,
   version, segregation-of-duties and mandatory-review facts.
 
-PostgreSQL is authoritative. RabbitMQ quorum queues carry versioned events. Qdrant is a derived tenant-filtered policy index. Redis is limited to cache/coordination. Documents remain local.
+PostgreSQL is authoritative. RabbitMQ quorum queues carry versioned events.
+Qdrant is a derived tenant-filtered policy index. Redis is limited to cache,
+coordination, and an expiring PII-free live execution projection; matching
+PostgreSQL steps always take precedence. Documents remain local.
 
 The case workspace includes a persisted execution map and sanitized judge
 diagnostics. The separate application copilot uses versioned procedural CAG and

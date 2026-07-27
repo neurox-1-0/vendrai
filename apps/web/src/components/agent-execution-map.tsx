@@ -87,7 +87,14 @@ function StepCard({ step }: { step: AgentStep }) {
         <span className="flex min-w-0 gap-3">
           <StepStatusIcon status={step.status} />
           <span className="min-w-0">
-            <span className="block truncate font-bold">{step.display_name}</span>
+            <span className="flex items-center gap-2">
+              <span className="block truncate font-bold">{step.display_name}</span>
+              {step.input_summary.projection === "LIVE" && (
+                <span className="rounded-full border border-current/25 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider">
+                  Live
+                </span>
+              )}
+            </span>
             <span className="mt-1 block text-xs opacity-75">
               {step.status.replaceAll("_", " ")} · attempt {step.attempt} · {formatDuration(step.latency_ms)}
             </span>
@@ -172,7 +179,7 @@ export function AgentExecutionMap({ runId }: { runId: string }) {
             </p>
             <h2 className="mt-2 font-display text-2xl font-bold">{data.objective}</h2>
             <p className="mt-2 text-sm text-[var(--color-muted)]">
-              Actual persisted steps and provider timing. Expand a node to inspect its route and structured result.
+              Durable execution history plus short-lived live specialist progress. Expand a node to inspect its route and structured result.
             </p>
           </div>
           {(roles.has("admin") || roles.has("auditor")) && (

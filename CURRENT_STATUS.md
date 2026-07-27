@@ -3,7 +3,7 @@
 Status is evidence-based. Allowed values are `NOT_STARTED`, `IMPLEMENTED`,
 `VERIFIED`, and `BLOCKED`.
 
-Last updated: 2026-07-25
+Last updated: 2026-07-27
 
 ## Release truth
 
@@ -52,8 +52,8 @@ Docker cleanup was performed.
 | Independent in-app and SMTP notifications | VERIFIED | Test proves SMTP failure leaves case status/version unchanged and creates an isolated retry. Live Mailpit/outage acceptance remains. |
 | OpenAPI and Orval-generated frontend client | VERIFIED | OpenAPI regeneration, Orval generation, ESLint and TypeScript pass; CI has generated-artifact drift gates. |
 | Operational frontend UX | IMPLEMENTED | Real work queues, claiming, SLA/saved filters, status chips, document rendering/correction, clarification, control review, evidence and admin health are wired; browser/accessibility acceptance remains. |
-| Agent execution and judge diagnostics UX | IMPLEMENTED | Case UI renders persisted planner/specialist/reasoning/verifier/HITL/ERP lanes, attempts, dependencies, rationale, latency, critical path and parallel time saved. Auditor/admin diagnostics are sanitized. Active sub-step projection before transaction commit and browser acceptance remain. |
-| Read-only application copilot | IMPLEMENTED | Tenant/user-scoped masked sessions, conversational working memory, versioned CAG retrieval, authorization-filtered case context, Gemini structured answers, explicit local fallback and allowlisted navigate/spotlight/tour actions pass API and contract tests. Published-help RAG, feedback/promotion and browser acceptance remain. |
+| Agent execution and judge diagnostics UX | IMPLEMENTED | Case UI renders durable planner/specialist/reasoning/verifier/HITL/ERP lanes, attempts, dependencies, rationale, latency, critical path and parallel time saved. A tenant/run-scoped Redis projection exposes `RUNNING` and terminal specialist progress before the worker transaction commits; matching PostgreSQL steps automatically take authority. Projection isolation/reconciliation tests pass, and projection failure cannot stop workflow execution. Auditor/admin diagnostics are sanitized. Browser acceptance remains. |
+| Read-only application copilot | IMPLEMENTED | Tenant/user-scoped masked sessions, conversational working memory, versioned CAG retrieval, authorization-filtered case context, Gemini structured answers, explicit local fallback, allowlisted navigate/spotlight/tour actions, and versioned tenant-scoped feedback pass API and contract tests. Published-help RAG, controlled administrator promotion and browser acceptance remain. |
 | OpenTelemetry/Tempo/Prometheus/Grafana profile | IMPLEMENTED | API/SQL/HTTP, outbox, broker, worker, retrieval and Gemini spans propagate W3C context; collector removes statements, bodies, prompts and URL queries. Live correlation/redaction inspection remains. |
 | Integration health view | IMPLEMENTED | Admin-only database, broker, Redis, storage, Qdrant, OCR, Gemini, sanctions, SMTP and ERP checks exist; full-stack validation remains. |
 | pgBackRest/WAL backup to isolated object storage | IMPLEMENTED | Encrypted repository configuration and restore runbook exist; RPO/RTO restore drill remains. |
@@ -65,7 +65,7 @@ Docker cleanup was performed.
 
 ## Latest local verification
 
-- API/domain/contract tests: `69 passed, 2 skipped`; the skips are the separately
+- API/domain/contract tests: `76 passed, 2 skipped`; the skips are the separately
   executed live PostgreSQL integration tests.
 - Live PostgreSQL RLS/checkpoint integration: `2 passed`.
 - Alembic PostgreSQL 16 downgrade-to-base and re-upgrade-to-head: passed.
@@ -73,9 +73,11 @@ Docker cleanup was performed.
 - OpenAPI export and Orval client regeneration: passed.
 - Frontend ESLint, TypeScript and Next.js 16.2.11 production build: passed.
 - Generated contracts include run steps/graph/diagnostics and copilot
-  sessions/messages with mutation idempotency enforcement.
+  sessions/messages/feedback with mutation idempotency enforcement.
 - Failure-isolated concurrency tests prove three specialist operations overlap
-  and a failed branch does not erase a successful sibling.
+  and a failed branch does not erase a successful sibling. Live-projection
+  tests prove tenant/run scoping, expiry, malformed-payload rejection,
+  durable-step precedence and workflow continuity during projection failure.
 - npm production dependency audit: `0 vulnerabilities`.
 - API, document and retrieval Python requirement audits: no known
   vulnerabilities in the last completed audit; CI reruns them.

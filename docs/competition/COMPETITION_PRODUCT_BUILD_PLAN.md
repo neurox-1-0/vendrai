@@ -282,8 +282,10 @@ Replace the raw event-centric layout with five coordinated areas:
 1. **Case summary:** business goal, current state, owner, SLA, and next safe
    action.
 2. **Agent execution map:** persisted graph with parallel lanes, selected path,
-   dependencies, attempts and measured timings. A short-lived live projection
-   is still required to show `RUNNING` sub-steps before transaction commit.
+   dependencies, attempts and measured timings. A PII-free tenant/run-scoped
+   Redis projection shows `RUNNING` and terminal specialist states before
+   transaction commit; matching PostgreSQL steps replace it automatically.
+   Projection failure never changes workflow execution.
 3. **Evidence workspace:** document page highlights, extracted fields,
    confidence, contradictions, and policy citations.
 4. **Decision panel:** one clearly scoped HITL decision, impact, evidence hash,
@@ -405,10 +407,11 @@ Implemented and generated into OpenAPI:
 - `POST /api/v1/copilot/sessions`
 - `GET /api/v1/copilot/sessions/{id}/messages`
 - `POST /api/v1/copilot/sessions/{id}/messages`
+- `POST /api/v1/copilot/messages/{message_id}/feedback`
+- `GET /api/v1/copilot/feedback` for admin/auditor roles only
 
 Still to add for controlled knowledge evolution:
 
-- `POST /api/v1/copilot/feedback`
 - `GET /api/v1/help/articles`
 - `POST /api/v1/admin/help/articles/{id}:publish`
 - `GET /api/v1/admin/context-packs`

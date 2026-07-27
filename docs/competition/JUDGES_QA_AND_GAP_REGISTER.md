@@ -133,7 +133,7 @@ not learn policy autonomously from chat.
 
 | Gap | Severity | Current truth | Closure evidence |
 |---|---|---|---|
-| Live sub-step projection before commit | Critical | Parallel steps and timings are real and durable, but become visible after the worker transaction commits | `RUNNING` projection plus durable reconciliation and browser proof |
+| Live sub-step projection browser acceptance | Medium | A tenant/run-scoped expiring Redis projection now shows active/terminal specialists before commit; PostgreSQL replaces matching steps and projection failure cannot stop the workflow | Browser proof during real supplier and invoice execution plus Redis outage injection |
 | Specialist scheduler is outside LangGraph | Medium | Validated I/O specialists run in a failure-isolated worker fan-out; reasoning/HITL/ERP are checkpointed LangGraph nodes | Explain and defend this deliberate boundary; optionally convert scheduler to a nested subgraph |
 | Copilot published-help RAG and promotion workflow | Medium | Versioned CAG, masked history, live case context and safe UI actions exist; controlled help publication is not yet built | Admin-reviewed help-pack version promotion and retrieval evaluation |
 | Two full browser workflows not accepted | Critical | Backend pieces exist; complete stack has not passed | Supplier and invoice journeys pass twice from fresh state |

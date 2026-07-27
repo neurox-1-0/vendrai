@@ -101,9 +101,14 @@ has a durable step record. The bounded executor captures each exception as a
 typed branch result, so the fan-in retains successful siblings and classifies
 failures individually instead of allowing one exception to abort aggregation.
 
-The UI proves parallelism using actual persisted start/end timestamps, summed
-agent compute, critical path and calculated parallel time saved. It does not
-manufacture animation or timing data.
+The UI proves parallelism using actual start/end timestamps, summed agent
+compute, critical path and calculated parallel time saved. While a long worker
+transaction is open, an expiring, PII-free Redis projection exposes active and
+terminal sibling states. PostgreSQL remains authoritative: once an
+`AgentStep` with the same node and attempt commits, the API discards the
+projection. If Redis is unavailable, execution continues and the durable
+history appears after commit. The UI does not manufacture animation or timing
+data.
 
 ## Failure recovery
 
@@ -179,10 +184,11 @@ The application copilot uses:
 The Context Assembly Gateway constructs and logs the minimum authorized context.
 Conversation history is untrusted context, not policy or memory.
 
-The current copilot implementation uses the versioned procedural CAG pack and
-authorization-filtered live case context. Published-help RAG and controlled
-administrator promotion of a new CAG version remain follow-on gates; the
-assistant never learns authority from chat.
+The current copilot implementation uses the versioned procedural CAG pack,
+authorization-filtered live case context, and versioned tenant-scoped user
+feedback. Published-help RAG and controlled administrator promotion of a new
+CAG version remain follow-on gates; feedback never changes the CAG
+automatically, and the assistant never learns authority from chat.
 
 ## Memory
 

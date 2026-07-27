@@ -39,6 +39,7 @@ from app.models import (
     Vendor,
 )
 from app.services.events import append_audit, append_case_event, enqueue_event
+from app.services.live_progress import specialist_progress_callback
 from app.workers.common import consume
 from app.workers.database import WorkerSession, set_worker_tenant
 from sqlalchemy import delete, func, select
@@ -989,7 +990,28 @@ async def run_invoice_analysis(envelope: dict[str, Any]) -> None:
                         extracted_invoice.get("vendor_name"),
                     )
                 )
-            initial_results = await execute_parallel(initial_operations)
+            route_reasons = {
+                item.capability_id: item.rationale
+                for item in plan.output.selected_capabilities
+            } if plan else {}
+            initial_dependencies = {
+                capability_id: (
+                    ["document_intelligence"]
+                    if capability_id == "vendor_resolution"
+                    else ["goal_planner"]
+                )
+                for capability_id in initial_operations
+            }
+            initial_results = await execute_parallel(
+                initial_operations,
+                on_progress=specialist_progress_callback(
+                    tenant_id=tenant_id,
+                    run_id=run_id,
+                    attempt=run.state_version,
+                    route_reasons=route_reasons,
+                    dependencies=initial_dependencies,
+                ),
+            )
             po_execution = initial_results.get("po_retrieval")
             po_data, po_source = (
                 po_execution["result"]
@@ -1024,10 +1046,6 @@ async def run_invoice_analysis(envelope: dict[str, Any]) -> None:
             reference_source = (
                 f"PO:{po_source};GRN:{grn_source}"
             )
-            route_reasons = {
-                item.capability_id: item.rationale
-                for item in plan.output.selected_capabilities
-            } if plan else {}
             for capability_id, result in initial_results.items():
                 output = result["result"]
                 if capability_id == "po_retrieval":
@@ -1060,11 +1078,9 @@ async def run_invoice_analysis(envelope: dict[str, Any]) -> None:
                                 capability_id,
                                 "Mandatory investigation retained after planner failure.",
                             ),
-                            "dependencies": (
-                                ["document_intelligence"]
-                                if capability_id == "vendor_resolution"
-                                else ["goal_planner"]
-                            ),
+                            "dependencies": initial_dependencies[
+                                capability_id
+                            ],
                             "started_at": result[
                                 "started_at"
                             ].isoformat(),

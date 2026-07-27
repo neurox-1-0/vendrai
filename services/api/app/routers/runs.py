@@ -22,6 +22,7 @@ from app.schemas import (
     RunResponse,
     RunTimingSummary,
 )
+from app.services.live_progress import read_live_steps
 
 router = APIRouter(tags=["runs", "events"])
 Db = Annotated[AsyncSession, Depends(get_db)]
@@ -120,6 +121,14 @@ def _sanitize(value):
     return value
 
 
+def _utc(value: datetime) -> datetime:
+    return (
+        value.replace(tzinfo=UTC)
+        if value.tzinfo is None
+        else value.astimezone(UTC)
+    )
+
+
 async def _authorized_run(
     run_id: uuid.UUID,
     db: AsyncSession,
@@ -160,18 +169,18 @@ def _step_response(
     step: AgentStep,
     available_names: set[str],
 ) -> AgentStepResponse:
-    started_at = step.created_at
+    started_at = _utc(step.created_at)
     recorded_start = step.input_summary.get("started_at")
     if isinstance(recorded_start, str):
         try:
-            started_at = datetime.fromisoformat(recorded_start)
+            started_at = _utc(datetime.fromisoformat(recorded_start))
         except ValueError:
             pass
     completed_at = None
     recorded_completion = step.output_summary.get("completed_at")
     if isinstance(recorded_completion, str):
         try:
-            completed_at = datetime.fromisoformat(recorded_completion)
+            completed_at = _utc(datetime.fromisoformat(recorded_completion))
         except ValueError:
             pass
     if (
@@ -205,6 +214,59 @@ def _step_response(
     )
 
 
+def _live_step_response(
+    item: dict,
+    available_names: set[str],
+) -> AgentStepResponse | None:
+    try:
+        started_at = _utc(datetime.fromisoformat(str(item["started_at"])))
+        completed_at = (
+            _utc(datetime.fromisoformat(str(item["completed_at"])))
+            if item.get("completed_at")
+            else None
+        )
+        node_name = str(item["node_name"])
+        dependencies = item.get("dependencies", [])
+        if not isinstance(dependencies, list):
+            dependencies = []
+        return AgentStepResponse(
+            step_id=uuid.UUID(str(item["step_id"])),
+            run_id=uuid.UUID(str(item["run_id"])),
+            node_name=node_name,
+            display_name=DISPLAY_NAMES.get(
+                node_name,
+                node_name.replace("_", " ").title(),
+            ),
+            agent_kind=_agent_kind(node_name),
+            attempt=int(item["attempt"]),
+            status=str(item["status"]),
+            route_reason=str(
+                item.get("route_reason")
+                or "Selected by the validated workflow plan."
+            ),
+            dependencies=[
+                str(dependency)
+                for dependency in dependencies
+                if str(dependency) in available_names
+            ],
+            input_summary={
+                "projection": "LIVE",
+                "projected_at": item.get("projected_at"),
+            },
+            output_summary={},
+            error=_sanitize(item.get("error", {})),
+            latency_ms=(
+                int(item["latency_ms"])
+                if item.get("latency_ms") is not None
+                else None
+            ),
+            started_at=started_at,
+            completed_at=completed_at,
+        )
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
 async def _run_graph(
     run: AgentRun,
     db: AsyncSession,
@@ -219,8 +281,37 @@ async def _run_graph(
             .order_by(AgentStep.created_at, AgentStep.node_name, AgentStep.attempt)
         )
     ).scalars().all()
-    available_names = {step.node_name for step in rows}
+    live_items = [
+        item
+        for item in await read_live_steps(run.tenant_id, run.run_id)
+        if item.get("tenant_id") == str(run.tenant_id)
+        and item.get("run_id") == str(run.run_id)
+    ]
+    available_names = {
+        step.node_name for step in rows
+    } | {
+        str(item.get("node_name"))
+        for item in live_items
+        if item.get("node_name")
+    }
     nodes = [_step_response(step, available_names) for step in rows]
+    durable_keys = {
+        (step.node_name, step.attempt)
+        for step in rows
+    }
+    for item in live_items:
+        try:
+            live_key = (
+                str(item["node_name"]),
+                int(item["attempt"]),
+            )
+        except (KeyError, TypeError, ValueError):
+            continue
+        if live_key in durable_keys:
+            continue
+        response = _live_step_response(item, available_names)
+        if response:
+            nodes.append(response)
     nodes.sort(key=lambda node: (node.started_at, node.node_name, node.attempt))
     latest_node_ids: dict[str, str] = {}
     for node in nodes:
@@ -252,12 +343,15 @@ async def _run_graph(
         )
     critical_path_ms = max(critical_by_name.values(), default=0)
     now = datetime.now(UTC)
-    if run.started_at and run.started_at.tzinfo is None:
+    effective_start = run.started_at or (
+        min((node.started_at for node in nodes), default=None)
+    )
+    if effective_start and effective_start.tzinfo is None:
         now = now.replace(tzinfo=None)
-    end = run.completed_at or (now if run.started_at else None)
+    end = run.completed_at or (now if effective_start else None)
     total_elapsed_ms = (
-        max(0, round((end - run.started_at).total_seconds() * 1000))
-        if end and run.started_at
+        max(0, round((end - effective_start).total_seconds() * 1000))
+        if end and effective_start
         else None
     )
     state = run.state_json if isinstance(run.state_json, dict) else {}

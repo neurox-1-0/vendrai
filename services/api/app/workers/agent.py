@@ -38,6 +38,7 @@ from app.models import (
     Vendor,
 )
 from app.services.events import append_audit, append_case_event, enqueue_event
+from app.services.live_progress import specialist_progress_callback
 from app.workers.common import consume
 from app.workers.database import WorkerSession, set_worker_tenant
 from langgraph.types import Command
@@ -371,8 +372,31 @@ async def run_analysis(envelope: dict) -> None:
                 selected_operations["policy_retrieval"] = (
                     retrieve_policy(tenant_id, policy_query)
                 )
+            route_reasons = {
+                item.capability_id: item.rationale
+                for item in plan.output.selected_capabilities
+            } if plan else {}
+            specialist_dependencies = {
+                capability_id: (
+                    ["document_intelligence"]
+                    if capability_id
+                    in {
+                        "duplicate_detection",
+                        "sanctions_screening",
+                    }
+                    else ["goal_planner"]
+                )
+                for capability_id in selected_operations
+            }
             specialist_results = await execute_parallel(
-                selected_operations
+                selected_operations,
+                on_progress=specialist_progress_callback(
+                    tenant_id=tenant_id,
+                    run_id=run_id,
+                    attempt=run.state_version,
+                    route_reasons=route_reasons,
+                    dependencies=specialist_dependencies,
+                ),
             )
             duplicate_result = specialist_results.get(
                 "duplicate_detection"
@@ -400,10 +424,6 @@ async def run_analysis(envelope: dict) -> None:
                 else ([], "POLICY_RETRIEVAL_UNAVAILABLE")
             )
 
-            route_reasons = {
-                item.capability_id: item.rationale
-                for item in plan.output.selected_capabilities
-            } if plan else {}
             specialist_summaries = {
                 "duplicate_detection": {
                     "candidate_count": len(duplicate_items),
@@ -455,15 +475,9 @@ async def run_analysis(envelope: dict) -> None:
                                 capability_id,
                                 "Mandatory safety investigation retained after planner failure.",
                             ),
-                            "dependencies": (
-                                ["document_intelligence"]
-                                if capability_id
-                                in {
-                                    "duplicate_detection",
-                                    "sanctions_screening",
-                                }
-                                else ["goal_planner"]
-                            ),
+                            "dependencies": specialist_dependencies[
+                                capability_id
+                            ],
                             "started_at": result[
                                 "started_at"
                             ].isoformat(),
