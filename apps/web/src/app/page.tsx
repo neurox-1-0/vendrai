@@ -11,6 +11,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { StatusChip } from "@/components/status-chip";
+import { useAssistanceTarget } from "@/components/assistance-registry";
 
 const terminal = new Set(["COMPLETED", "REJECTED", "FAILED", "CANCELLED"]);
 const defaultFilters = {
@@ -21,6 +22,14 @@ const defaultFilters = {
 };
 
 export default function Dashboard() {
+  const queueAssistance = useAssistanceTarget({
+    id: "dashboard.work-queue",
+    title: "Case work queue",
+    description:
+      "Filter durable supplier and invoice work by status, priority and ownership, then open the case requiring attention.",
+    tour: "dashboard.orientation",
+    order: 10,
+  });
   const [search, setSearch] = useState("");
   const [showNotifications, setShowNotifications] = useState(false);
   const [filters, setFilters] = useState(() => {
@@ -124,7 +133,7 @@ export default function Dashboard() {
         ))}
       </section>
 
-      <Card className="p-0">
+      <Card {...queueAssistance} className="p-0">
         <div className="border-b border-white/40 p-6">
           <h2 className="font-display text-xl font-bold">Case work queue</h2>
           <p className="mt-1 text-sm text-[var(--color-muted)]">Status, ownership age and safe next action are sourced from the API.</p>

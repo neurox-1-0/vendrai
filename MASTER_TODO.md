@@ -9,7 +9,7 @@ The controlling competition sequence is
 [`docs/competition/COMPETITION_PRODUCT_BUILD_PLAN.md`](./docs/competition/COMPETITION_PRODUCT_BUILD_PLAN.md).
 Until the competition build passes, prioritize:
 
-1. A lean runnable demo profile.
+1. The complete functional product profile, with optional operations isolated.
 2. Live projection and durable reconciliation for the implemented dynamic,
    failure-isolated specialist fan-out/fan-in.
 3. Complete supplier and invoice browser journeys.
@@ -29,9 +29,12 @@ Do not add unrelated enterprise infrastructure before these gates are complete.
   failures, start/end times, critical path and parallel time saved.
 - [x] Add a case execution map and sanitized auditor/admin diagnostics drawer.
 - [x] Add a separate read-only copilot with masked tenant/user-scoped history,
-  versioned CAG, live authorized case context, allowlisted UI actions and
-  versioned tenant-scoped feedback.
+  versioned CAG, live authorized case context, self-registering semantic UI
+  targets, allowlisted actions, accessible guided tours and versioned
+  tenant-scoped feedback.
 - [x] Regenerate OpenAPI/Orval contracts and add copilot/graph contract tests.
+- [x] Keep all functional services in `product-up`, while moving only
+  telemetry dashboards and continuous WAL backup into `operations-up`.
 
 ## Implemented on `feature/p0-p1-enterprise-e2e`
 
@@ -62,14 +65,16 @@ Do not add unrelated enterprise infrastructure before these gates are complete.
 ## P0 — acceptance blockers before PR to `dev`
 
 - [ ] Owner: free enough workstation space for the complete
-  OCR/model/security/observability build. Current free space is approximately
-  7.1 GB; 45–50 GB remains the safe acceptance target.
+  OCR/model/security product build. Current free space is approximately
+  8.9 GB with no NeuroX OCR/retrieval image cached. Allow 25–35 GB for the
+  product build; 45–50 GB remains the safe target for operations and repeated
+  evaluation runs.
 - [x] Add a local environment bootstrap that preserves the Gemini key,
   generates internal service/database/Keycloak/MinIO/Grafana secrets and never
   commits `.env`.
 - [x] Execute the bootstrap and verify that the actual `.env` resolves the
   Compose configuration without exposing secret values.
-- [ ] Launch `docker compose --profile acceptance up --build` with fresh volumes.
+- [ ] Launch `./scripts/stack.sh product-up` and verify every health check.
 - [ ] Pull the pinned OPA image, run `opa check`, and exercise allow/deny/outage
   decisions; the current Docker registry CDN DNS lookup failed.
 - [ ] Run clean supplier onboarding and invoice exception journeys with real Gemini.

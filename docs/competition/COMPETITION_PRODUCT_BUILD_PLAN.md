@@ -45,7 +45,10 @@ prioritizes a dependable product experience over adding more infrastructure.
   persisted run data.
 - A separate, read-only application copilot with tenant/user-scoped masked
   history, versioned CAG, authorized case context and allowlisted
-  navigation/spotlight/tour actions.
+  navigation/spotlight/tour actions. Visible components self-register their
+  semantic help metadata, so guidance adapts as screens evolve.
+- A complete functional `product-up` runtime and a separate `operations-up`
+  overlay for telemetry dashboards and continuous WAL backup.
 
 ### Competition-critical gaps
 
@@ -65,8 +68,9 @@ prioritizes a dependable product experience over adding more infrastructure.
   are not complete.
 - Docker is available. The local bootstrap preserved the configured Gemini key
   and generated every required internal Compose secret without printing or
-  committing them. Approximately 7.1 GB is free, still below the safe
-  allowance for the complete OCR/model/security/observability build.
+  committing them. Approximately 8.9 GB is free and no NeuroX OCR/retrieval
+  image is cached, still below the safe allowance for the complete functional
+  OCR/model/security build.
 
 ## 3. Product boundaries
 
@@ -376,9 +380,13 @@ The model returns an answer, citations, and zero or more allowlisted UI actions:
 }
 ```
 
-The frontend maps stable target IDs to components. It validates authorization,
-asks for confirmation when an action changes the view, and rejects unknown
-targets.
+Each frontend component registers a stable semantic target ID, user-facing
+title, short description, optional tour group and order. Only visible targets
+are sent as masked context. The backend turns them into read-only spotlight
+actions and validates the model's selected action ID. The browser resolves the
+registered element at click time, rejects missing targets, scrolls/focuses it
+accessibly and offers Back, Next, Finish and Skip. New components therefore do
+not require editing a central selector list.
 
 ### Context, CAG, RAG, and personalization
 
@@ -425,9 +433,11 @@ and recovery.
 
 ## 10. Delivery sequence
 
-### P0. Make the demo runnable
+### P0. Make the product runnable
 
-- Create lean `demo` and complete `acceptance` Compose profiles.
+- Keep every workflow dependency, including all OCR engines and retrieval, in
+  the `product-up` profile. Keep only telemetry dashboards and continuous WAL
+  backup in the optional `operations-up` overlay.
 - Keep the ERP sandbox persistent and query-driven; remove “mock result”
   language from the product.
 - Materialize two golden synthetic document packs plus three failure variants
@@ -465,8 +475,9 @@ and recovery.
 ### P5. Copilot — core implemented, published-help workflow pending
 
 - The versioned CAG pack, safe UI action registry, spotlight/tours and masked
-  sessions are implemented. Add published-help RAG, user feedback and
-  administrator promotion.
+  sessions are implemented. Semantic target self-registration and versioned
+  user feedback are implemented. Add published-help RAG and administrator
+  promotion.
 - Test prompt injection, unauthorized navigation, cross-tenant queries, and
   forbidden action attempts.
 

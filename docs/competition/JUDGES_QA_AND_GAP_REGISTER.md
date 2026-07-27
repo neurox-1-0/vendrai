@@ -129,15 +129,23 @@ Published help and policies use RAG. Analytics can propose FAQ changes, but an
 administrator reviews and publishes every authoritative update. The system does
 not learn policy autonomously from chat.
 
+### Is the guided UI hardcoded?
+
+No coordinates or cursor movements are scripted. Visible components register a
+stable semantic ID, description and optional tour group. The browser sends only
+masked visible metadata, the server exposes read-only action IDs, and the user
+chooses whether to spotlight or advance. If a component moves, the registered
+element moves with it; if it disappears, the action fails visibly.
+
 ## Current gap register
 
 | Gap | Severity | Current truth | Closure evidence |
 |---|---|---|---|
 | Live sub-step projection browser acceptance | Medium | A tenant/run-scoped expiring Redis projection now shows active/terminal specialists before commit; PostgreSQL replaces matching steps and projection failure cannot stop the workflow | Browser proof during real supplier and invoice execution plus Redis outage injection |
 | Specialist scheduler is outside LangGraph | Medium | Validated I/O specialists run in a failure-isolated worker fan-out; reasoning/HITL/ERP are checkpointed LangGraph nodes | Explain and defend this deliberate boundary; optionally convert scheduler to a nested subgraph |
-| Copilot published-help RAG and promotion workflow | Medium | Versioned CAG, masked history, live case context and safe UI actions exist; controlled help publication is not yet built | Admin-reviewed help-pack version promotion and retrieval evaluation |
+| Copilot published-help RAG and promotion workflow | Medium | Versioned CAG, masked history, live case context, semantic self-registering UI guidance and safe actions exist; controlled help publication is not yet built | Admin-reviewed help-pack version promotion and retrieval evaluation |
 | Two full browser workflows not accepted | Critical | Backend pieces exist; complete stack has not passed | Supplier and invoice journeys pass twice from fresh state |
-| Full local stack blocked | Critical | About 7.1 GB free; Docker is available and a safe internal-secret bootstrap now exists, but the complete OCR/security/observability build needs more headroom | Free disk, run clean Compose acceptance and record actual image/volume usage |
+| Full local stack blocked | Critical | About 8.9 GB free with no NeuroX OCR/retrieval cache. `product-up` keeps the full functional OCR/security stack; telemetry/backup are isolated in `operations-up` | Free disk, run clean product acceptance and record actual image/volume usage |
 | ERP integration is a sandbox | High | Correct for competition, not a customer ERP | Honest labeling and live persistent operations |
 | Numerical evaluation incomplete | High | Manifest exists; corpus run does not | Recorded extraction, matching, retrieval, safety metrics |
 | UI polish not fully accepted | High | Dashboard, both intake screens and copilot passed a live frontend smoke check with no console errors; backend-driven states could not be exercised | Responsive/accessibility review plus complete role-based workflow and judge rehearsal |

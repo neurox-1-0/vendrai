@@ -186,9 +186,23 @@ Conversation history is untrusted context, not policy or memory.
 
 The current copilot implementation uses the versioned procedural CAG pack,
 authorization-filtered live case context, and versioned tenant-scoped user
-feedback. Published-help RAG and controlled administrator promotion of a new
-CAG version remain follow-on gates; feedback never changes the CAG
-automatically, and the assistant never learns authority from chat.
+feedback. UI controls self-register semantic titles, descriptions and tour
+groups. Only visible masked targets reach the server, which exposes them as
+read-only allowlisted actions; the browser resolves the actual element only
+after the user clicks. This survives layout/component changes without central
+DOM selector maintenance. Published-help RAG and controlled administrator
+promotion of a new CAG version remain follow-on gates; feedback never changes
+the CAG automatically, and the assistant never learns authority from chat.
+
+## Deployment profiles
+
+`product-up` contains all dependencies required to execute supplier and invoice
+workflows: identity, data stores, messaging, object quarantine, malware
+scanning, Docling/Tesseract/EasyOCR, policy retrieval, Gemini workers,
+notifications, OPA and the ERP sandbox. `operations-up` overlays telemetry
+dashboards and continuous WAL backup using the same source and services.
+Separating these operational concerns reduces startup cost without weakening
+product controls or replacing any business result with a fixture.
 
 ## Memory
 

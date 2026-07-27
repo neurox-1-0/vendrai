@@ -574,6 +574,36 @@
         "title": "ClarificationTaskResponse",
         "type": "object"
       },
+      "CopilotAssistanceTarget": {
+        "properties": {
+          "description": {
+            "maxLength": 300,
+            "minLength": 4,
+            "title": "Description",
+            "type": "string"
+          },
+          "target_id": {
+            "maxLength": 120,
+            "minLength": 3,
+            "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$",
+            "title": "Target Id",
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 120,
+            "minLength": 2,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "target_id",
+          "title",
+          "description"
+        ],
+        "title": "CopilotAssistanceTarget",
+        "type": "object"
+      },
       "CopilotCitation": {
         "properties": {
           "help_pack_version": {
@@ -680,6 +710,14 @@
       },
       "CopilotMessageRequest": {
         "properties": {
+          "assistance_targets": {
+            "items": {
+              "$ref": "#/components/schemas/CopilotAssistanceTarget"
+            },
+            "maxItems": 40,
+            "title": "Assistance Targets",
+            "type": "array"
+          },
           "case_id": {
             "anyOf": [
               {

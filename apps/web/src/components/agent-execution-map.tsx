@@ -24,6 +24,7 @@ import { useAuth } from "@/app/providers";
 import { api, type AgentStep } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { useAssistanceTarget } from "@/components/assistance-registry";
 
 const KIND_LABELS: Record<AgentStep["agent_kind"], string> = {
   PLANNER: "Planning",
@@ -131,6 +132,14 @@ function StepCard({ step }: { step: AgentStep }) {
 
 export function AgentExecutionMap({ runId }: { runId: string }) {
   const { roles } = useAuth();
+  const assistance = useAssistanceTarget({
+    id: "case.agent-map",
+    title: "Agent execution map",
+    description:
+      "Inspect the selected agents, dependencies, live status, measured latency, critical path and parallel time saved.",
+    tour: "case.review-tour",
+    order: 10,
+  });
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const graph = useQuery({
     queryKey: ["run-graph", runId],
@@ -152,14 +161,14 @@ export function AgentExecutionMap({ runId }: { runId: string }) {
 
   if (graph.isLoading) {
     return (
-      <Card data-tour-id="case.agent-map" aria-live="polite">
+      <Card {...assistance} aria-live="polite">
         <div className="h-40 animate-pulse rounded-2xl bg-slate-200" />
       </Card>
     );
   }
   if (graph.isError || !graph.data) {
     return (
-      <Card data-tour-id="case.agent-map">
+      <Card {...assistance}>
         <p role="alert" className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-900">
           Execution data is temporarily unavailable: {graph.error?.message}
         </p>
@@ -170,7 +179,7 @@ export function AgentExecutionMap({ runId }: { runId: string }) {
   const data = graph.data;
   return (
     <>
-      <Card data-tour-id="case.agent-map" className="overflow-hidden">
+      <Card {...assistance} className="overflow-hidden">
         <header className="flex flex-col justify-between gap-5 lg:flex-row lg:items-start">
           <div>
             <p className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-violet-700">

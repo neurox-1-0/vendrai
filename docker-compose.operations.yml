@@ -1,0 +1,86 @@
+services:
+  postgres:
+    command:
+      - postgres
+      - -c
+      - archive_mode=on
+      - -c
+      - archive_timeout=900
+      - -c
+      - wal_level=replica
+      - -c
+      - archive_command=pgbackrest --stanza=neurox archive-push %p
+    environment:
+      PGBACKREST_REPO1_TYPE: s3
+      PGBACKREST_REPO1_S3_ENDPOINT: minio
+      PGBACKREST_REPO1_S3_PORT: "9000"
+      PGBACKREST_REPO1_S3_REGION: us-east-1
+      PGBACKREST_REPO1_S3_URI_STYLE: path
+      PGBACKREST_REPO1_S3_VERIFY_TLS: "n"
+      PGBACKREST_REPO1_BUCKET: neurox-backups
+      PGBACKREST_REPO1_PATH: /pgbackrest
+      PGBACKREST_REPO1_S3_KEY: ${MINIO_BACKUP_USER:?set MINIO_BACKUP_USER}
+      PGBACKREST_REPO1_S3_KEY_SECRET: ${MINIO_BACKUP_PASSWORD:?set MINIO_BACKUP_PASSWORD}
+      PGBACKREST_REPO1_CIPHER_TYPE: aes-256-cbc
+      PGBACKREST_REPO1_CIPHER_PASS: ${PGBACKREST_REPO_CIPHER_PASS:?set PGBACKREST_REPO_CIPHER_PASS}
+    volumes:
+      - pgbackrest_spool:/var/spool/pgbackrest
+
+  minio-init:
+    volumes:
+      - ./infra/minio/neurox-backup-policy.json:/config/neurox-backup-policy.json:ro
+    command:
+      - |
+        mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"
+        mc mb --ignore-existing local/neurox-quarantine
+        mc mb --ignore-existing local/neurox-documents
+        mc mb --ignore-existing local/neurox-backups
+        mc anonymous set none local/neurox-quarantine
+        mc anonymous set none local/neurox-documents
+        mc anonymous set none local/neurox-backups
+        mc admin policy create local neurox-app /config/neurox-policy.json
+        mc admin user add local "$${MINIO_APP_USER}" "$${MINIO_APP_PASSWORD}" || true
+        mc admin policy attach local neurox-app --user "$${MINIO_APP_USER}"
+        mc admin policy create local neurox-backup /config/neurox-backup-policy.json
+        mc admin user add local "$${MINIO_BACKUP_USER}" "$${MINIO_BACKUP_PASSWORD}" || true
+        mc admin policy attach local neurox-backup --user "$${MINIO_BACKUP_USER}"
+
+  api:
+    environment:
+      OTEL_ENABLED: "true"
+
+  outbox-relay:
+    environment:
+      OTEL_ENABLED: "true"
+
+  document-worker:
+    environment:
+      OTEL_ENABLED: "true"
+
+  agent-worker:
+    environment:
+      OTEL_ENABLED: "true"
+
+  invoice-worker:
+    environment:
+      OTEL_ENABLED: "true"
+
+  retrieval-api:
+    environment:
+      OTEL_ENABLED: "true"
+
+  retrieval-worker:
+    environment:
+      OTEL_ENABLED: "true"
+
+  notification-worker:
+    environment:
+      OTEL_ENABLED: "true"
+
+  sanctions-worker:
+    environment:
+      OTEL_ENABLED: "true"
+
+  erp-worker:
+    environment:
+      OTEL_ENABLED: "true"

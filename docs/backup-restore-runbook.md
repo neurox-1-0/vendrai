@@ -1,18 +1,25 @@
 # PostgreSQL backup and restore runbook
 
 NeuroX archives WAL continuously to the private `neurox-backups` bucket with
-pgBackRest. The default `archive_timeout=900` bounds normal WAL archival lag to
-15 minutes. A daily differential and weekly full backup should be scheduled by
-the deployment host.
+pgBackRest when the operations overlay is enabled. The functional product
+profile intentionally starts without continuous backup so workflow
+development is not blocked by optional operational infrastructure. The
+operations profile sets `archive_timeout=900`, bounding normal WAL archival
+lag to 15 minutes. A daily differential and weekly full backup should be
+scheduled by the deployment host.
 
 ## Backup check
 
 Run inside the release directory:
 
 ```bash
-docker compose exec -T postgres neurox-backup full
-docker compose exec -T postgres pgbackrest --stanza=neurox check
-docker compose exec -T postgres pgbackrest --stanza=neurox info
+./scripts/stack.sh operations-up
+docker compose -f docker-compose.yml -f docker-compose.operations.yml \
+  --profile operations exec -T postgres neurox-backup full
+docker compose -f docker-compose.yml -f docker-compose.operations.yml \
+  --profile operations exec -T postgres pgbackrest --stanza=neurox check
+docker compose -f docker-compose.yml -f docker-compose.operations.yml \
+  --profile operations exec -T postgres pgbackrest --stanza=neurox info
 ```
 
 Do not use the application MinIO credential for backup operations. Rotate

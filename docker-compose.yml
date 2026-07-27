@@ -33,7 +33,7 @@ x-api-image: &api-image
     KEYCLOAK_ISSUER: http://localhost:8080/realms/neurox
     KEYCLOAK_JWKS_URL: http://keycloak:8080/realms/neurox/protocol/openid-connect/certs
     OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
-    OTEL_ENABLED: "true"
+    OTEL_ENABLED: ${OTEL_ENABLED:-false}
     DEFAULT_MODEL: gemini-3.6-flash
     ALLOW_EXTERNAL_LLM: ${ALLOW_EXTERNAL_LLM:-true}
     LLM_DATA_CLASSIFICATION: ${LLM_DATA_CLASSIFICATION:-SYNTHETIC}
@@ -63,16 +63,6 @@ services:
       dockerfile: infra/postgres/Dockerfile
     image: neurox-postgres:local
     restart: unless-stopped
-    command:
-      - postgres
-      - -c
-      - archive_mode=on
-      - -c
-      - archive_timeout=900
-      - -c
-      - wal_level=replica
-      - -c
-      - archive_command=pgbackrest --stanza=neurox archive-push %p
     environment:
       POSTGRES_DB: neurox
       POSTGRES_USER: neurox_migration
@@ -81,18 +71,6 @@ services:
       NEUROX_WORKER_DB_PASSWORD: ${NEUROX_WORKER_DB_PASSWORD:?set NEUROX_WORKER_DB_PASSWORD}
       NEUROX_RELAY_DB_PASSWORD: ${NEUROX_RELAY_DB_PASSWORD:?set NEUROX_RELAY_DB_PASSWORD}
       NEUROX_AUDIT_DB_PASSWORD: ${NEUROX_AUDIT_DB_PASSWORD:?set NEUROX_AUDIT_DB_PASSWORD}
-      PGBACKREST_REPO1_TYPE: s3
-      PGBACKREST_REPO1_S3_ENDPOINT: minio
-      PGBACKREST_REPO1_S3_PORT: "9000"
-      PGBACKREST_REPO1_S3_REGION: us-east-1
-      PGBACKREST_REPO1_S3_URI_STYLE: path
-      PGBACKREST_REPO1_S3_VERIFY_TLS: "n"
-      PGBACKREST_REPO1_BUCKET: neurox-backups
-      PGBACKREST_REPO1_PATH: /pgbackrest
-      PGBACKREST_REPO1_S3_KEY: ${MINIO_BACKUP_USER:?set MINIO_BACKUP_USER}
-      PGBACKREST_REPO1_S3_KEY_SECRET: ${MINIO_BACKUP_PASSWORD:?set MINIO_BACKUP_PASSWORD}
-      PGBACKREST_REPO1_CIPHER_TYPE: aes-256-cbc
-      PGBACKREST_REPO1_CIPHER_PASS: ${PGBACKREST_REPO_CIPHER_PASS:?set PGBACKREST_REPO_CIPHER_PASS}
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U neurox_migration -d neurox"]
       interval: 5s
@@ -101,7 +79,6 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./infra/postgres/001-roles.sh:/docker-entrypoint-initdb.d/001-roles.sh:ro
-      - pgbackrest_spool:/var/spool/pgbackrest
     networks: [data]
 
   migrate:
@@ -186,16 +163,11 @@ services:
         mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"
         mc mb --ignore-existing local/neurox-quarantine
         mc mb --ignore-existing local/neurox-documents
-        mc mb --ignore-existing local/neurox-backups
         mc anonymous set none local/neurox-quarantine
         mc anonymous set none local/neurox-documents
-        mc anonymous set none local/neurox-backups
         mc admin policy create local neurox-app /config/neurox-policy.json
         mc admin user add local "$${MINIO_APP_USER}" "$${MINIO_APP_PASSWORD}" || true
         mc admin policy attach local neurox-app --user "$${MINIO_APP_USER}"
-        mc admin policy create local neurox-backup /config/neurox-backup-policy.json
-        mc admin user add local "$${MINIO_BACKUP_USER}" "$${MINIO_BACKUP_PASSWORD}" || true
-        mc admin policy attach local neurox-backup --user "$${MINIO_BACKUP_USER}"
     depends_on:
       minio:
         condition: service_healthy
@@ -261,6 +233,7 @@ services:
     networks: [app]
 
   otel-collector:
+    profiles: [operations]
     image: otel/opentelemetry-collector-contrib:0.130.0
     restart: unless-stopped
     command: ["--config=/etc/otelcol/config.yaml"]
@@ -272,6 +245,7 @@ services:
         condition: service_started
 
   tempo:
+    profiles: [operations]
     image: grafana/tempo:2.8.1
     restart: unless-stopped
     command: ["-config.file=/etc/tempo/tempo.yaml"]
@@ -281,6 +255,7 @@ services:
     networks: [app]
 
   prometheus:
+    profiles: [operations]
     image: prom/prometheus:v3.4.1
     restart: unless-stopped
     command: ["--config.file=/etc/prometheus/prometheus.yaml"]
@@ -293,6 +268,7 @@ services:
         condition: service_started
 
   grafana:
+    profiles: [operations]
     image: grafana/grafana:12.0.2
     restart: unless-stopped
     environment:

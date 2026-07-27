@@ -7,9 +7,18 @@ import { api } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useAssistanceTarget } from "@/components/assistance-registry";
 
 export default function CaseIntake() {
   const router = useRouter();
+  const intakeAssistance = useAssistanceTarget({
+    id: "supplier.secure-intake",
+    title: "Supplier secure intake",
+    description:
+      "Enter the supplier request, choose priority and upload synthetic PDF evidence into quarantine before analysis.",
+    tour: "supplier.intake-tour",
+    order: 10,
+  });
   const [title, setTitle] = useState("");
   const [priority, setPriority] = useState<"LOW" | "NORMAL" | "HIGH" | "URGENT">("NORMAL");
   const [files, setFiles] = useState<File[]>([]);
@@ -48,7 +57,7 @@ export default function CaseIntake() {
         <p className="mt-2 text-[var(--color-muted)]">Files enter quarantine first. They are scanned before extraction or agent analysis.</p>
       </header>
       <form onSubmit={submit} className="grid max-w-6xl gap-8 lg:grid-cols-[1.5fr_1fr]">
-        <Card className="space-y-8">
+        <Card {...intakeAssistance} className="space-y-8">
           <div>
             <label htmlFor="title" className="mb-2 block text-sm font-bold">Supplier or request title</label>
             <Input id="title" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Example: Onboard Alpine Components GmbH" required minLength={3} />

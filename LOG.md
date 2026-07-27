@@ -4,6 +4,55 @@ This is the concise chronological log requested by the project owner. Detailed
 acceptance evidence remains in [`CURRENT_STATUS.md`](./CURRENT_STATUS.md), and
 unfinished gates remain in [`MASTER_TODO.md`](./MASTER_TODO.md).
 
+## 2026-07-27 — product-first runtime and adaptive UI guidance
+
+### Implemented
+
+- Split the runtime into two Compose modes without forking product code:
+  - `./scripts/stack.sh product-up` starts every functional supplier and
+    invoice dependency, including Keycloak, malware scanning, the complete
+    Docling/Tesseract/EasyOCR document worker, retrieval, Gemini workers,
+    notifications and ERP sandbox.
+  - `./scripts/stack.sh operations-up` adds OpenTelemetry, Tempo, Prometheus,
+    Grafana and encrypted PostgreSQL WAL backup.
+- Removed telemetry and backup from the default startup dependency path.
+  Optional operational infrastructure can no longer prevent product
+  functionality from starting.
+- Preserved the existing Docker containers, images and volumes. No cleanup or
+  deletion was performed.
+- Replaced the copilot's hardcoded case-tour selector list with a semantic,
+  self-registering assistance registry.
+- Added dynamic, masked UI-target context to the copilot request contract.
+  Gemini may choose only server-validated read-only spotlight actions for
+  controls that the browser reports as currently visible.
+- Added accessible user-controlled spotlight tours with title, explanation,
+  Back, Next, Finish and Skip controls. The copilot never takes workflow action
+  or hijacks the pointer.
+- Improved the mobile copilot layout, made the send icon unambiguous, added a
+  retry affordance and replaced raw `Failed to fetch` text with an actionable
+  service-unavailable message.
+- Regenerated OpenAPI and Orval artifacts.
+
+### Verified
+
+- Copilot API/security tests: `5 passed`.
+- Full API/domain/contract suite: `77 passed, 2 skipped`.
+- Ruff: passed.
+- Frontend ESLint: passed.
+- Frontend TypeScript: passed.
+- Frontend production build: passed.
+- Default product Compose and operations-overlay Compose both resolve.
+- `scripts/stack.sh` shell syntax: passed.
+
+### Current workstation constraint
+
+- Host free space was rechecked at approximately 8.9 GB.
+- No NeuroX OCR or retrieval image is cached. Building the complete local
+  product would risk filling the system disk, so the heavy Docker build was
+  not started.
+- The full OCR stack remains required in the product profile. Nothing was
+  removed or substituted.
+
 ## 2026-07-27 — live UI and environment audit
 
 ### Verified today

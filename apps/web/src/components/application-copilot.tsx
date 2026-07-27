@@ -4,11 +4,12 @@ import { FormEvent, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import {
   Bot,
+  ChevronLeft,
   ChevronRight,
   CircleHelp,
   LoaderCircle,
   MapPin,
-  Send,
+  RotateCcw,
   ShieldCheck,
   Sparkles,
   ThumbsDown,
@@ -17,20 +18,22 @@ import {
 } from "lucide-react";
 
 import {
+  useAssistanceRegistry,
+} from "@/components/assistance-registry";
+import { Button } from "@/components/ui/button";
+import {
   api,
   type CopilotMessage,
   type CopilotSession,
 } from "@/lib/api";
-import { Button } from "@/components/ui/button";
 
 const SESSION_STORAGE_KEY = "neurox-copilot-session";
-const CASE_TOUR_TARGETS = [
-  "case.agent-map",
-  "case.clarification",
-  "case.document-review",
-  "case.evidence",
-  "case.decision-control",
-];
+
+interface TourState {
+  group: string;
+  targetIds: string[];
+  index: number;
+}
 
 function caseIdFromPath(pathname: string): string | undefined {
   const match = pathname.match(
@@ -39,38 +42,46 @@ function caseIdFromPath(pathname: string): string | undefined {
   return match?.[1];
 }
 
-function spotlight(targetId: string): boolean {
-  const target = document.querySelector<HTMLElement>(
-    `[data-tour-id="${CSS.escape(targetId)}"]`,
-  );
-  if (!target) return false;
-  document
-    .querySelectorAll<HTMLElement>(".copilot-spotlight")
-    .forEach((item) => item.classList.remove("copilot-spotlight"));
-  target.classList.add("copilot-spotlight");
-  target.scrollIntoView({ behavior: "smooth", block: "center" });
-  window.setTimeout(
-    () => target.classList.remove("copilot-spotlight"),
-    7_000,
-  );
-  return true;
+function friendlyError(error: unknown): string {
+  const message =
+    error instanceof Error ? error.message : "COPILOT_UNAVAILABLE";
+  if (
+    message.toLowerCase().includes("failed to fetch")
+    || message.includes("ECONNREFUSED")
+  ) {
+    return (
+      "NeuroX services are not reachable yet. Start the product "
+      + "runtime, then retry."
+    );
+  }
+  if (message.includes("LLM_AUTH_INVALID")) {
+    return "Gemini rejected the configured key. Ask an administrator to verify it.";
+  }
+  if (message.includes("LLM_QUOTA_EXCEEDED")) {
+    return "Gemini quota is exhausted. Deterministic work is preserved for retry.";
+  }
+  return message.replaceAll("_", " ");
 }
 
 export function ApplicationCopilot() {
   const pathname = usePathname();
   const router = useRouter();
+  const assistance = useAssistanceRegistry();
   const [open, setOpen] = useState(false);
   const [session, setSession] = useState<CopilotSession | null>(null);
   const [messages, setMessages] = useState<CopilotMessage[]>([]);
   const [question, setQuestion] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [tourIndex, setTourIndex] = useState<number | null>(null);
+  const [tour, setTour] = useState<TourState | null>(null);
   const [feedbackSent, setFeedbackSent] = useState<Set<string>>(
     () => new Set(),
   );
   const scrollAnchor = useRef<HTMLDivElement>(null);
   const caseId = useMemo(() => caseIdFromPath(pathname), [pathname]);
+  const tourTarget = tour
+    ? assistance.get(tour.targetIds[tour.index])
+    : undefined;
 
   async function ensureSession(): Promise<CopilotSession> {
     if (session) return session;
@@ -115,11 +126,7 @@ export function ApplicationCopilot() {
     try {
       await ensureSession();
     } catch (requestError) {
-      setError(
-        requestError instanceof Error
-          ? requestError.message
-          : "COPILOT_UNAVAILABLE",
-      );
+      setError(friendlyError(requestError));
     } finally {
       setLoading(false);
     }
@@ -154,6 +161,7 @@ export function ApplicationCopilot() {
         activeSession.copilot_session_id,
         normalized,
         pathname,
+        assistance.context(),
         caseId,
       );
       setMessages((current) => [...current, response]);
@@ -161,37 +169,58 @@ export function ApplicationCopilot() {
         scrollAnchor.current?.scrollIntoView({ behavior: "smooth" }),
       );
     } catch (requestError) {
-      setError(
-        requestError instanceof Error
-          ? requestError.message
-          : "COPILOT_UNAVAILABLE",
-      );
+      setError(friendlyError(requestError));
     } finally {
       setLoading(false);
     }
   }
 
+  function endTour() {
+    assistance.clearSpotlight();
+    setTour(null);
+  }
+
+  function moveTour(index: number) {
+    if (!tour) return;
+    const bounded = Math.max(
+      0,
+      Math.min(index, tour.targetIds.length - 1),
+    );
+    if (!assistance.spotlight(tour.targetIds[bounded])) {
+      setError("That guided control is no longer visible.");
+      endTour();
+      return;
+    }
+    setTour({ ...tour, index: bounded });
+  }
+
   function runAction(action: CopilotMessage["ui_actions"][number]) {
+    setError("");
     if (action.action_type === "NAVIGATE") {
       router.push(action.target);
       return;
     }
     if (action.action_type === "SPOTLIGHT") {
-      if (!spotlight(action.target)) {
-        setError("That control is not visible in the current case state.");
+      if (!assistance.spotlight(action.target)) {
+        setError("That control is not visible in the current screen state.");
+        return;
       }
+      setOpen(false);
       return;
     }
     if (action.action_type === "START_TOUR") {
-      const firstVisible = CASE_TOUR_TARGETS.findIndex((target) =>
-        document.querySelector(`[data-tour-id="${CSS.escape(target)}"]`),
-      );
-      if (firstVisible < 0) {
-        setError("Open a case before starting the review tour.");
+      const targets = assistance.list(action.target);
+      if (targets.length === 0) {
+        setError("Open a matching workflow screen before starting this guide.");
         return;
       }
-      setTourIndex(firstVisible);
-      spotlight(CASE_TOUR_TARGETS[firstVisible]);
+      const nextTour = {
+        group: action.target,
+        targetIds: targets.map((target) => target.id),
+        index: 0,
+      };
+      setTour(nextTour);
+      assistance.spotlight(nextTour.targetIds[0]);
       setOpen(false);
       return;
     }
@@ -217,24 +246,6 @@ export function ApplicationCopilot() {
     );
   }
 
-  function advanceTour() {
-    if (tourIndex === null) return;
-    const remaining = CASE_TOUR_TARGETS.slice(tourIndex + 1);
-    const offset = remaining.findIndex((target) =>
-      document.querySelector(`[data-tour-id="${CSS.escape(target)}"]`),
-    );
-    if (offset < 0) {
-      setTourIndex(null);
-      document
-        .querySelectorAll<HTMLElement>(".copilot-spotlight")
-        .forEach((item) => item.classList.remove("copilot-spotlight"));
-      return;
-    }
-    const nextIndex = tourIndex + offset + 1;
-    setTourIndex(nextIndex);
-    spotlight(CASE_TOUR_TARGETS[nextIndex]);
-  }
-
   async function sendFeedback(
     messageId: string,
     rating: "HELPFUL" | "NOT_HELPFUL",
@@ -247,11 +258,7 @@ export function ApplicationCopilot() {
         (current) => new Set(current).add(messageId),
       );
     } catch (requestError) {
-      setError(
-        requestError instanceof Error
-          ? requestError.message
-          : "COPILOT_FEEDBACK_FAILED",
-      );
+      setError(friendlyError(requestError));
     }
   }
 
@@ -275,7 +282,7 @@ export function ApplicationCopilot() {
           role="dialog"
           aria-modal="true"
           aria-labelledby="copilot-title"
-          className="fixed inset-x-3 bottom-20 z-50 flex max-h-[78vh] flex-col overflow-hidden rounded-3xl border border-white/60 bg-[var(--color-clay)] shadow-2xl md:inset-x-auto md:bottom-7 md:right-7 md:w-[430px]"
+          className="fixed inset-2 z-50 flex flex-col overflow-hidden rounded-3xl border border-white/60 bg-[var(--color-clay)] shadow-2xl md:inset-auto md:bottom-7 md:right-7 md:max-h-[82vh] md:w-[430px]"
         >
           <header className="flex items-start justify-between gap-4 border-b border-white/50 bg-slate-950 p-5 text-white">
             <div className="flex gap-3">
@@ -431,19 +438,29 @@ export function ApplicationCopilot() {
               </p>
             )}
             {error && (
-              <p
+              <div
                 role="alert"
                 className="rounded-xl bg-red-50 p-3 text-sm text-red-900"
               >
-                {error}
-              </p>
+                <p>{error}</p>
+                {error.includes("not reachable") && (
+                  <button
+                    type="button"
+                    className="mt-2 inline-flex items-center gap-1 rounded-lg bg-red-100 px-2 py-1 font-bold hover:bg-red-200"
+                    onClick={() => void openCopilot()}
+                  >
+                    <RotateCcw className="h-3.5 w-3.5" />
+                    Retry connection
+                  </button>
+                )}
+              </div>
             )}
             <div ref={scrollAnchor} />
           </div>
 
           <form
             onSubmit={(event) => void submit(event)}
-            className="border-t border-white/50 p-4"
+            className="border-t border-slate-300 bg-slate-50 p-4"
           >
             <label htmlFor="copilot-question" className="sr-only">
               Ask about NeuroX
@@ -456,45 +473,75 @@ export function ApplicationCopilot() {
                 rows={2}
                 maxLength={1200}
                 placeholder="Ask what happened, why, or how to use this screen…"
-                className="min-h-12 flex-1 resize-none rounded-2xl bg-white/50 p-3 text-sm shadow-[var(--shadow-inset-sm)] outline-none focus:ring-2 focus:ring-violet-600"
+                className="min-h-12 flex-1 resize-none rounded-2xl border border-slate-200 bg-white p-3 text-sm shadow-[var(--shadow-inset-sm)] outline-none focus:ring-2 focus:ring-violet-600"
               />
               <Button
                 type="submit"
                 variant="primary"
+                title="Send question"
                 aria-label="Send question"
                 disabled={loading || question.trim().length < 2}
-                className="h-12 w-12 rounded-full p-0"
+                className="h-12 w-12 shrink-0 rounded-full p-0 disabled:bg-slate-300 disabled:text-slate-700 disabled:shadow-none"
               >
-                <Send className="h-4 w-4" />
+                <span
+                  className="text-xl leading-none"
+                  aria-hidden="true"
+                >
+                  ➤
+                </span>
               </Button>
             </div>
           </form>
         </section>
       )}
 
-      {tourIndex !== null && (
-        <aside className="fixed bottom-7 left-1/2 z-[70] w-[min(92vw,520px)] -translate-x-1/2 rounded-2xl bg-slate-950 p-5 text-white shadow-2xl">
+      {tour && tourTarget && (
+        <aside
+          role="dialog"
+          aria-label="Guided application tour"
+          className="fixed bottom-4 left-1/2 z-[70] w-[min(94vw,560px)] -translate-x-1/2 rounded-2xl bg-slate-950 p-5 text-white shadow-2xl"
+        >
           <p className="text-xs font-bold uppercase tracking-wider text-violet-300">
-            Guided case tour · step {tourIndex + 1}
+            Guided workflow · step {tour.index + 1} of{" "}
+            {tour.targetIds.length}
           </p>
-          <p className="mt-2 font-bold">
-            {CASE_TOUR_TARGETS[tourIndex].split(".").at(-1)?.replaceAll("-", " ")}
+          <p className="mt-2 font-bold">{tourTarget.title}</p>
+          <p className="mt-1 text-sm text-slate-300">
+            {tourTarget.description}
           </p>
-          <div className="mt-4 flex justify-end gap-3">
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
             <button
               type="button"
               className="rounded-xl px-3 py-2 text-sm hover:bg-white/10"
-              onClick={() => setTourIndex(null)}
+              onClick={endTour}
             >
-              End tour
+              Skip tour
             </button>
-            <button
-              type="button"
-              className="rounded-xl bg-violet-600 px-4 py-2 text-sm font-bold"
-              onClick={advanceTour}
-            >
-              Next visible control
-            </button>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                disabled={tour.index === 0}
+                className="inline-flex items-center gap-1 rounded-xl px-3 py-2 text-sm hover:bg-white/10 disabled:opacity-40"
+                onClick={() => moveTour(tour.index - 1)}
+              >
+                <ChevronLeft className="h-4 w-4" />
+                Back
+              </button>
+              <button
+                type="button"
+                className="inline-flex items-center gap-1 rounded-xl bg-violet-600 px-4 py-2 text-sm font-bold hover:bg-violet-500"
+                onClick={() =>
+                  tour.index === tour.targetIds.length - 1
+                    ? endTour()
+                    : moveTour(tour.index + 1)
+                }
+              >
+                {tour.index === tour.targetIds.length - 1
+                  ? "Finish"
+                  : "Next"}
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
           </div>
         </aside>
       )}

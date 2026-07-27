@@ -5,8 +5,11 @@
  * Tenant-isolated, evidence-driven vendor onboarding and human approval API.
  * OpenAPI spec version: 1.0.0
  */
+import type { CopilotAssistanceTarget } from './copilotAssistanceTarget';
 
 export interface CopilotMessageRequest {
+  /** @maxItems 40 */
+  assistance_targets?: CopilotAssistanceTarget[];
   case_id?: string | null;
   /**
      * @minLength 1
