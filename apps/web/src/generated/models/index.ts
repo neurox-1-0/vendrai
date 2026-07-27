@@ -29,6 +29,7 @@ export * from './clarificationResponseRequestAnswers';
 export * from './clarificationTaskResponse';
 export * from './clarificationTaskResponseQuestionsItem';
 export * from './clarificationTaskResponseResponse';
+export * from './copilotAssistanceTarget';
 export * from './copilotCitation';
 export * from './copilotFeedbackRequest';
 export * from './copilotFeedbackRequestRating';

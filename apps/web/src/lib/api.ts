@@ -131,6 +131,12 @@ export interface CopilotSession {
   updated_at: string;
 }
 
+export interface AssistanceTargetContext {
+  target_id: string;
+  title: string;
+  description: string;
+}
+
 export interface CopilotMessage {
   copilot_message_id: string;
   copilot_session_id: string;
@@ -397,6 +403,7 @@ export const api = {
     sessionId: string,
     question: string,
     currentPath: string,
+    assistanceTargets: AssistanceTargetContext[],
     caseId?: string,
   ) =>
     request<CopilotMessage>(
@@ -410,6 +417,7 @@ export const api = {
           question,
           current_path: currentPath,
           case_id: caseId ?? null,
+          assistance_targets: assistanceTargets,
         }),
       },
     ),

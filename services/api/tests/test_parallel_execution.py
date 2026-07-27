@@ -63,3 +63,45 @@ async def test_parallel_executor_preserves_successful_siblings_on_failure():
     assert results["sanctions"]["result"] == {
         "evidence": "retained"
     }
+
+
+@pytest.mark.asyncio
+async def test_parallel_executor_reports_running_and_terminal_progress():
+    events = []
+
+    async def report(name, progress):
+        events.append((name, progress["status"]))
+
+    async def operation():
+        await asyncio.sleep(0)
+        return "done"
+
+    results = await execute_parallel(
+        {"policy": operation()},
+        on_progress=report,
+    )
+
+    assert results["policy"]["result"] == "done"
+    assert events == [
+        ("policy", "RUNNING"),
+        ("policy", "SUCCESS"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_parallel_executor_ignores_projection_failure():
+    async def broken_projection(_name, _progress):
+        raise ConnectionError("redis deliberately unavailable")
+
+    async def operation():
+        return {"safety_check": "retained"}
+
+    results = await execute_parallel(
+        {"sanctions": operation()},
+        on_progress=broken_projection,
+    )
+
+    assert results["sanctions"]["status"] == "SUCCESS"
+    assert results["sanctions"]["result"] == {
+        "safety_check": "retained"
+    }

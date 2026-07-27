@@ -236,10 +236,29 @@ class CopilotSessionResponse(BaseModel):
     updated_at: datetime
 
 
+class CopilotAssistanceTarget(BaseModel):
+    target_id: str = Field(
+        min_length=3,
+        max_length=120,
+        pattern=r"^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$",
+    )
+    title: str = Field(min_length=2, max_length=120)
+    description: str = Field(min_length=4, max_length=300)
+
+    @field_validator("title", "description")
+    @classmethod
+    def normalize_and_mask_context(cls, value: str) -> str:
+        return mask_sensitive_text(" ".join(value.split()))
+
+
 class CopilotMessageRequest(BaseModel):
     question: str = Field(min_length=2, max_length=1200)
     current_path: str = Field(default="/", min_length=1, max_length=300)
     case_id: UUID | None = None
+    assistance_targets: list[CopilotAssistanceTarget] = Field(
+        default_factory=list,
+        max_length=40,
+    )
 
     @field_validator("question")
     @classmethod

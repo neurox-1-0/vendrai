@@ -7,9 +7,18 @@ import { api } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useAssistanceTarget } from "@/components/assistance-registry";
 
 export default function InvoiceIntake() {
   const router = useRouter();
+  const intakeAssistance = useAssistanceTarget({
+    id: "invoice.secure-intake",
+    title: "Invoice exception intake",
+    description:
+      "Enter invoice references and upload the synthetic invoice, purchase order and receipt evidence for matching.",
+    tour: "invoice.intake-tour",
+    order: 10,
+  });
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [poNumber, setPoNumber] = useState("");
   const [priority, setPriority] = useState<"LOW" | "NORMAL" | "HIGH" | "URGENT">("NORMAL");
@@ -62,7 +71,7 @@ export default function InvoiceIntake() {
         <p className="mt-2 text-[var(--color-muted)]">Upload an invoice to trigger 3-way matching and tolerance checks.</p>
       </header>
       <form onSubmit={submit} className="grid max-w-6xl gap-8 lg:grid-cols-[1.5fr_1fr]">
-        <Card className="space-y-8">
+        <Card {...intakeAssistance} className="space-y-8">
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label htmlFor="invoiceNumber" className="mb-2 block text-sm font-bold">Invoice Number</label>

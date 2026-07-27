@@ -5,6 +5,7 @@ import pytest
 from app.database import AsyncSessionLocal
 from app.main import app
 from app.models import AgentRun, AgentStep, ApprovalTask
+from app.routers import runs as runs_router
 from httpx import ASGITransport, AsyncClient
 
 
@@ -314,6 +315,117 @@ async def test_run_graph_exposes_real_steps_timings_and_sanitized_diagnostics():
     assert diagnostics.json()["integrity"]["private_reasoning_persisted"] is False
     assert "raw_ocr" not in diagnostics.json()["decision_summary"]
     assert forbidden.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_run_graph_merges_scoped_live_progress_and_prefers_durable(
+    monkeypatch,
+):
+    transport = ASGITransport(app=app)
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+    ) as client:
+        created = await client.post(
+            "/api/v1/cases",
+            json={"title": "Live progress reconciliation"},
+            headers={"Idempotency-Key": "live-progress-case"},
+        )
+        case_id = uuid.UUID(created.json()["case_id"])
+        run_id = uuid.uuid4()
+        tenant_id = uuid.UUID(
+            "00000000-0000-0000-0000-000000000001"
+        )
+        async with AsyncSessionLocal() as session, session.begin():
+            session.add(
+                AgentRun(
+                    run_id=run_id,
+                    tenant_id=tenant_id,
+                    case_id=case_id,
+                    thread_id=f"live:{run_id}",
+                    graph_name="vendor_onboarding",
+                    status="QUEUED",
+                )
+            )
+            session.add(
+                AgentStep(
+                    tenant_id=tenant_id,
+                    run_id=run_id,
+                    node_name="sanctions_screening",
+                    attempt=1,
+                    status="SUCCESS",
+                    input_summary={
+                        "route_reason": "Authoritative screening.",
+                    },
+                    output_summary={"disposition": "CLEAR"},
+                    error={},
+                    latency_ms=50,
+                )
+            )
+        projected_at = datetime.now(UTC)
+
+        async def fake_live_steps(request_tenant_id, request_run_id):
+            assert request_tenant_id == tenant_id
+            assert request_run_id == run_id
+            shared = {
+                "step_id": str(uuid.uuid4()),
+                "tenant_id": str(tenant_id),
+                "run_id": str(run_id),
+                "attempt": 1,
+                "route_reason": "Projected specialist work.",
+                "dependencies": [],
+                "started_at": projected_at.isoformat(),
+                "completed_at": None,
+                "latency_ms": None,
+                "error": {},
+                "projected_at": projected_at.isoformat(),
+            }
+            return [
+                {
+                    **shared,
+                    "node_name": "sanctions_screening",
+                    "status": "FAILED",
+                },
+                {
+                    **shared,
+                    "step_id": str(uuid.uuid4()),
+                    "node_name": "policy_retrieval",
+                    "status": "RUNNING",
+                },
+                {
+                    **shared,
+                    "step_id": str(uuid.uuid4()),
+                    "tenant_id": str(uuid.uuid4()),
+                    "node_name": "cross_tenant_probe",
+                    "status": "RUNNING",
+                },
+            ]
+
+        monkeypatch.setattr(
+            runs_router,
+            "read_live_steps",
+            fake_live_steps,
+        )
+        graph = await client.get(f"/api/v1/runs/{run_id}/graph")
+
+    assert graph.status_code == 200, graph.text
+    nodes = {
+        node["node_name"]: node
+        for node in graph.json()["nodes"]
+    }
+    assert set(nodes) == {
+        "policy_retrieval",
+        "sanctions_screening",
+    }
+    assert nodes["sanctions_screening"]["status"] == "SUCCESS"
+    assert nodes["sanctions_screening"]["input_summary"].get(
+        "projection"
+    ) is None
+    assert nodes["policy_retrieval"]["status"] == "RUNNING"
+    assert nodes["policy_retrieval"]["input_summary"]["projection"] == (
+        "LIVE"
+    )
+    assert graph.json()["timing"]["total_elapsed_ms"] is not None
 
 
 @pytest.mark.asyncio

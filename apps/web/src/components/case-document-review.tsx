@@ -7,6 +7,7 @@ import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { useAssistanceTarget } from "@/components/assistance-registry";
 
 export function CaseDocumentReview({
   caseId,
@@ -16,6 +17,14 @@ export function CaseDocumentReview({
   caseVersion: number;
 }) {
   const queryClient = useQueryClient();
+  const assistance = useAssistanceTarget({
+    id: "case.document-review",
+    title: "Document evidence review",
+    description:
+      "Compare the authorized source document with masked extracted fields, confidence, source locations and versioned corrections.",
+    tour: "case.review-tour",
+    order: 30,
+  });
   const [selectedId, setSelectedId] = useState("");
   const [editingField, setEditingField] = useState("");
   const [correction, setCorrection] = useState("");
@@ -80,7 +89,7 @@ export function CaseDocumentReview({
   });
 
   return (
-    <Card data-tour-id="case.document-review">
+    <Card {...assistance}>
       <div className="mb-6 flex items-center gap-3">
         <FileText className="h-6 w-6 text-[var(--color-accent)]" />
         <div>

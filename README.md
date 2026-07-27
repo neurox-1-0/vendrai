@@ -18,7 +18,10 @@ NeuroX currently contains an evidence-driven supplier-onboarding platform and a 
 - `opa`: fail-closed authorization for every ERP write using state, evidence,
   version, segregation-of-duties and mandatory-review facts.
 
-PostgreSQL is authoritative. RabbitMQ quorum queues carry versioned events. Qdrant is a derived tenant-filtered policy index. Redis is limited to cache/coordination. Documents remain local.
+PostgreSQL is authoritative. RabbitMQ quorum queues carry versioned events.
+Qdrant is a derived tenant-filtered policy index. Redis is limited to cache,
+coordination, and an expiring PII-free live execution projection; matching
+PostgreSQL steps always take precedence. Documents remain local.
 
 The case workspace includes a persisted execution map and sanitized judge
 diagnostics. The separate application copilot uses versioned procedural CAG and
@@ -30,18 +33,23 @@ but has no workflow-mutation capability.
 Requirements: Docker Compose, Node.js 22.18+ and Python 3.12+.
 
 ```bash
-cp .env.example .env
+./scripts/bootstrap-local-env.sh
 ```
 
-Replace every `CHANGE_ME` value with independently generated secrets. P0/P1
-acceptance requires `AUTH_MODE=keycloak`, `ALLOW_EXTERNAL_LLM=true`,
-`DEFAULT_MODEL=gemini-3.6-flash`, and synthetic-only test data. Invoice
-processing reads only locally extracted and masked page text; it never uploads
-source documents to Gemini.
+The bootstrap creates the ignored root `.env`, generates independent local
+service secrets, preserves an existing `GEMINI_API_KEY`, and never prints
+secret values. Use only synthetic business data. Invoice processing sends only
+locally extracted, masked minimum context to Gemini; source documents never
+leave the platform.
 
 ```bash
-docker compose --profile acceptance up --build
+./scripts/stack.sh product-up
 ```
+
+`product-up` is the complete functional product: both workflows, Keycloak
+bootstrap, PostgreSQL, RabbitMQ, Redis, MinIO, ClamAV, Docling, Tesseract,
+EasyOCR, Qdrant retrieval, OPA, Mailpit and the ERP sandbox. It does not omit
+OCR or replace services with hardcoded data.
 
 Open:
 
@@ -50,10 +58,24 @@ Open:
 - Keycloak: <http://localhost:8080>
 - Mailpit: <http://localhost:8025>
 
-The acceptance profile bootstraps synthetic users from secrets in `.env`; it
-does not commit passwords. The default profile may use development identity
-only for isolated developer work. Production configuration is rejected if
-development authentication or placeholder service credentials remain.
+The product command bootstraps synthetic users from secrets in `.env`; it does
+not commit passwords. Set `AUTH_MODE=keycloak` for role acceptance.
+`AUTH_MODE=development` is restricted to local engineering. Production
+configuration rejects development authentication and placeholder credentials.
+
+### Optional operations profile
+
+Telemetry dashboards and continuous WAL backup are real operational
+capabilities, but they are not required to start and prove the workflows.
+
+```bash
+./scripts/stack.sh operations-up
+```
+
+This overlays OpenTelemetry Collector, Tempo, Prometheus, Grafana and encrypted
+pgBackRest/WAL archival on the same product services. No source fork or fake
+runtime is used. Stop either profile without deleting volumes using
+`product-down` or `operations-down`.
 
 ## Local verification without containers
 
@@ -97,16 +119,19 @@ If sanctions or applicable policy data is unavailable, analysis fails closed int
 
 ## Backup and acceptance
 
-PostgreSQL WAL archiving and pgBackRest use the isolated `neurox-backups`
-bucket and separate MinIO credentials. Follow
+In the operations profile, PostgreSQL WAL archiving and pgBackRest use the
+isolated `neurox-backups` bucket and separate MinIO credentials. Follow
 [`docs/backup-restore-runbook.md`](./docs/backup-restore-runbook.md) and restore
 only into a new isolated volume.
 
-The complete acceptance stack needs at least 8 CPUs, 16 GB RAM and roughly
-50 GB free disk:
+The functional product profile keeps all OCR engines and local retrieval
+models. Allow at least 8 CPUs, 16 GB RAM and 25–35 GB of free build headroom.
+The operations profile and repeated failure/evaluation runs need roughly
+45–50 GB of safe headroom because Docker temporarily retains build layers,
+model downloads, malware definitions and durable volumes.
 
 ```bash
-docker compose --profile acceptance up --build
+./scripts/stack.sh product-up
 ```
 
 Before running it, set `AUTH_MODE=keycloak`, keep all test data synthetic, set

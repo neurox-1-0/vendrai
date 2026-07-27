@@ -12,6 +12,7 @@ from app.config import settings
 from app.copilot import (
     HELP_PACK_VERSION,
     CopilotDraft,
+    SafeAction,
     allowed_actions,
     attempts_business_mutation,
     retrieve_help,
@@ -340,6 +341,15 @@ async def send_message(
         principal,
     )
     action_registry = allowed_actions(entries, principal)
+    for target in request.assistance_targets:
+        action_id = f"spotlight::{target.target_id}"
+        action_registry[action_id] = SafeAction(
+            action_id=action_id,
+            action_type="SPOTLIGHT",
+            target=target.target_id,
+            label=f"Show {target.title}",
+            roles=frozenset(principal.roles),
+        )
     citations = [
         {
             "source_id": entry.source_id,
@@ -406,6 +416,10 @@ async def send_message(
                     for entry in entries
                 ],
                 "allowed_action_ids": sorted(action_registry),
+                "available_ui_targets": [
+                    target.model_dump()
+                    for target in request.assistance_targets
+                ],
             },
             CopilotDraft,
         )

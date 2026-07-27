@@ -12,10 +12,35 @@ import { StatusChip } from "@/components/status-chip";
 import { CaseClarification } from "@/components/case-clarification";
 import { CaseDocumentReview } from "@/components/case-document-review";
 import { AgentExecutionMap } from "@/components/agent-execution-map";
+import { useAssistanceTarget } from "@/components/assistance-registry";
 
 export default function CaseDetail() {
   const caseId = String(useParams().id);
   const queryClient = useQueryClient();
+  const eventsAssistance = useAssistanceTarget({
+    id: "case.events",
+    title: "Observable workflow events",
+    description:
+      "Review durable, replayable workflow events and public reason codes without exposing private chain-of-thought.",
+    tour: "case.review-tour",
+    order: 40,
+  });
+  const evidenceAssistance = useAssistanceTarget({
+    id: "case.evidence",
+    title: "Evidence and explanations",
+    description:
+      "Inspect the evidence claims, source locations, confidence and deterministic reason codes supporting the proposed outcome.",
+    tour: "case.review-tour",
+    order: 50,
+  });
+  const decisionAssistance = useAssistanceTarget({
+    id: "case.decision-control",
+    title: "Human decision control",
+    description:
+      "Approve or reject only after reviewing the case version and evidence hash; stale or replayed decisions are rejected.",
+    tour: "case.review-tour",
+    order: 60,
+  });
   const [comment, setComment] = useState("");
   const [decisionError, setDecisionError] = useState("");
   const caseQuery = useQuery({ queryKey: ["case", caseId], queryFn: () => api.getCase(caseId) });
@@ -128,7 +153,7 @@ export default function CaseDetail() {
           {runId && <AgentExecutionMap runId={runId} />}
           <CaseClarification caseId={caseId} caseVersion={currentCase.current_version} />
           <CaseDocumentReview caseId={caseId} caseVersion={currentCase.current_version} />
-          <Card data-tour-id="case.events">
+          <Card {...eventsAssistance}>
             <div className="mb-6 flex items-center gap-3"><FileSearch className="h-6 w-6 text-[var(--color-accent)]" /><h2 className="font-display text-xl font-bold">Observable workflow events</h2></div>
             <ol className="space-y-5">
               {(events.data ?? []).map((event) => (
@@ -143,7 +168,7 @@ export default function CaseDetail() {
               {!events.isLoading && (events.data ?? []).length === 0 && <li className="text-sm text-[var(--color-muted)]">No workflow events have been recorded.</li>}
             </ol>
           </Card>
-          <Card data-tour-id="case.evidence">
+          <Card {...evidenceAssistance}>
             <div className="mb-6 flex items-center gap-3"><ShieldAlert className="h-6 w-6 text-[var(--color-accent)]" /><h2 className="font-display text-xl font-bold">Evidence and explanations</h2></div>
             <div className="space-y-4">
               {(evidence.data?.items ?? []).map((item) => (
@@ -267,7 +292,7 @@ export default function CaseDetail() {
         </div>
 
         <aside className="space-y-8">
-          <Card data-tour-id="case.decision-control">
+          <Card {...decisionAssistance}>
             <h2 className="font-display text-xl font-bold">Decision control</h2>
             {task ? (
               <>

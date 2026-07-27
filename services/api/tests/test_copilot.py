@@ -204,6 +204,94 @@ async def test_copilot_uses_structured_gemini_output_and_safe_action_ids(
 
 
 @pytest.mark.asyncio
+async def test_copilot_accepts_only_masked_semantic_ui_targets(
+    monkeypatch,
+):
+    async def fake_call(_prompt, payload, model):
+        assert model is CopilotDraft
+        assert (
+            "spotlight::invoice.secure-intake"
+            in payload["allowed_action_ids"]
+        )
+        assert (
+            "jane@example.com"
+            not in payload["available_ui_targets"][0]["description"]
+        )
+        return LLMCallResult(
+            output=CopilotDraft(
+                answer="Use the secure invoice intake control.",
+                citation_ids=[],
+                requested_action_ids=[
+                    "spotlight::invoice.secure-intake"
+                ],
+            ),
+            model="gemini-test",
+            model_version="gemini-test-2",
+            latency_ms=29,
+            prompt_tokens=18,
+            output_tokens=10,
+        )
+
+    monkeypatch.setattr("app.routers.copilot.call_llm", fake_call)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+    ) as client:
+        session = await client.post(
+            "/api/v1/copilot/sessions",
+            json={"current_path": "/invoices/new"},
+            headers={"Idempotency-Key": "copilot-session-targets"},
+        )
+        session_id = session.json()["copilot_session_id"]
+        response = await client.post(
+            f"/api/v1/copilot/sessions/{session_id}/messages",
+            json={
+                "question": "Show me where to upload an invoice",
+                "current_path": "/invoices/new",
+                "assistance_targets": [
+                    {
+                        "target_id": "invoice.secure-intake",
+                        "title": "secure invoice intake",
+                        "description": (
+                            "Upload synthetic files; contact "
+                            "jane@example.com for help"
+                        ),
+                    }
+                ],
+            },
+            headers={"Idempotency-Key": "copilot-message-targets"},
+        )
+        invalid = await client.post(
+            f"/api/v1/copilot/sessions/{session_id}/messages",
+            json={
+                "question": "Show unsafe target",
+                "current_path": "/invoices/new",
+                "assistance_targets": [
+                    {
+                        "target_id": "javascript:alert(1)",
+                        "title": "unsafe target",
+                        "description": "This must be rejected",
+                    }
+                ],
+            },
+            headers={
+                "Idempotency-Key": "copilot-message-invalid-target"
+            },
+        )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["ui_actions"] == [
+        {
+            "action_type": "SPOTLIGHT",
+            "target": "invoice.secure-intake",
+            "label": "Show secure invoice intake",
+        }
+    ]
+    assert invalid.status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_copilot_feedback_is_versioned_scoped_and_idempotent():
     transport = ASGITransport(app=app)
     async with AsyncClient(

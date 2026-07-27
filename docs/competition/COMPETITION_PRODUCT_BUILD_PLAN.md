@@ -45,7 +45,10 @@ prioritizes a dependable product experience over adding more infrastructure.
   persisted run data.
 - A separate, read-only application copilot with tenant/user-scoped masked
   history, versioned CAG, authorized case context and allowlisted
-  navigation/spotlight/tour actions.
+  navigation/spotlight/tour actions. Visible components self-register their
+  semantic help metadata, so guidance adapts as screens evolve.
+- A complete functional `product-up` runtime and a separate `operations-up`
+  overlay for telemetry dashboards and continuous WAL backup.
 
 ### Competition-critical gaps
 
@@ -54,17 +57,20 @@ prioritizes a dependable product experience over adding more infrastructure.
   PostgreSQL-checkpointed LangGraph owns bounded reasoning, verification, HITL
   and ERP confirmation. This is visible as one combined execution graph, but
   the specialist scheduler is not itself a LangGraph subgraph.
-- Specialist results are durable, but intermediate `RUNNING` step projections
-  are not yet committed while the long worker transaction is active. The UI
-  polls and updates when durable steps commit; true sub-step live streaming
-  remains a release gate.
+- Specialist results are durable. A short-lived, PII-free Redis projection now
+  exposes `RUNNING` and terminal sibling states while the long worker
+  transaction is active. The UI polls every two seconds, and matching
+  PostgreSQL `AgentStep` records replace projections after commit. Full browser
+  proof on the running Compose stack remains a release gate.
 - Neither workflow has passed a full live browser journey on the complete
   Compose stack.
 - The 100-case manifest exists, but the documents and numerical evaluation run
   are not complete.
-- The local `.env` is missing required service credentials and Docker access
-  could not be approved in the current Codex session. Approximately 4.9 GB is
-  free, still below the safe allowance for the OCR/model/observability stack.
+- Docker is available. The local bootstrap preserved the configured Gemini key
+  and generated every required internal Compose secret without printing or
+  committing them. Approximately 8.9 GB is free and no NeuroX OCR/retrieval
+  image is cached, still below the safe allowance for the complete functional
+  OCR/model/security build.
 
 ## 3. Product boundaries
 
@@ -282,8 +288,10 @@ Replace the raw event-centric layout with five coordinated areas:
 1. **Case summary:** business goal, current state, owner, SLA, and next safe
    action.
 2. **Agent execution map:** persisted graph with parallel lanes, selected path,
-   dependencies, attempts and measured timings. A short-lived live projection
-   is still required to show `RUNNING` sub-steps before transaction commit.
+   dependencies, attempts and measured timings. A PII-free tenant/run-scoped
+   Redis projection shows `RUNNING` and terminal specialist states before
+   transaction commit; matching PostgreSQL steps replace it automatically.
+   Projection failure never changes workflow execution.
 3. **Evidence workspace:** document page highlights, extracted fields,
    confidence, contradictions, and policy citations.
 4. **Decision panel:** one clearly scoped HITL decision, impact, evidence hash,
@@ -372,9 +380,13 @@ The model returns an answer, citations, and zero or more allowlisted UI actions:
 }
 ```
 
-The frontend maps stable target IDs to components. It validates authorization,
-asks for confirmation when an action changes the view, and rejects unknown
-targets.
+Each frontend component registers a stable semantic target ID, user-facing
+title, short description, optional tour group and order. Only visible targets
+are sent as masked context. The backend turns them into read-only spotlight
+actions and validates the model's selected action ID. The browser resolves the
+registered element at click time, rejects missing targets, scrolls/focuses it
+accessibly and offers Back, Next, Finish and Skip. New components therefore do
+not require editing a central selector list.
 
 ### Context, CAG, RAG, and personalization
 
@@ -405,10 +417,11 @@ Implemented and generated into OpenAPI:
 - `POST /api/v1/copilot/sessions`
 - `GET /api/v1/copilot/sessions/{id}/messages`
 - `POST /api/v1/copilot/sessions/{id}/messages`
+- `POST /api/v1/copilot/messages/{message_id}/feedback`
+- `GET /api/v1/copilot/feedback` for admin/auditor roles only
 
 Still to add for controlled knowledge evolution:
 
-- `POST /api/v1/copilot/feedback`
 - `GET /api/v1/help/articles`
 - `POST /api/v1/admin/help/articles/{id}:publish`
 - `GET /api/v1/admin/context-packs`
@@ -420,9 +433,11 @@ and recovery.
 
 ## 10. Delivery sequence
 
-### P0. Make the demo runnable
+### P0. Make the product runnable
 
-- Create lean `demo` and complete `acceptance` Compose profiles.
+- Keep every workflow dependency, including all OCR engines and retrieval, in
+  the `product-up` profile. Keep only telemetry dashboards and continuous WAL
+  backup in the optional `operations-up` overlay.
 - Keep the ERP sandbox persistent and query-driven; remove “mock result”
   language from the product.
 - Materialize two golden synthetic document packs plus three failure variants
@@ -460,8 +475,9 @@ and recovery.
 ### P5. Copilot — core implemented, published-help workflow pending
 
 - The versioned CAG pack, safe UI action registry, spotlight/tours and masked
-  sessions are implemented. Add published-help RAG, user feedback and
-  administrator promotion.
+  sessions are implemented. Semantic target self-registration and versioned
+  user feedback are implemented. Add published-help RAG and administrator
+  promotion.
 - Test prompt injection, unauthorized navigation, cross-tenant queries, and
   forbidden action attempts.
 

@@ -7,6 +7,7 @@ import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { useAssistanceTarget } from "@/components/assistance-registry";
 
 export function CaseClarification({
   caseId,
@@ -16,6 +17,14 @@ export function CaseClarification({
   caseVersion: number;
 }) {
   const queryClient = useQueryClient();
+  const assistance = useAssistanceTarget({
+    id: "case.clarification",
+    title: "Clarification request",
+    description:
+      "Answer only the missing or contradictory fields requested by the workflow, then resume from the durable checkpoint.",
+    tour: "case.review-tour",
+    order: 20,
+  });
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const tasks = useQuery({
     queryKey: ["clarifications"],
@@ -43,7 +52,7 @@ export function CaseClarification({
 
   return (
     <Card
-      data-tour-id="case.clarification"
+      {...assistance}
       className="border border-amber-300 bg-amber-50/70"
     >
       <div className="mb-5 flex items-center gap-3">

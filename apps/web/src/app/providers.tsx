@@ -6,6 +6,7 @@ import { createContext, useContext, useEffect, useState } from "react";
 
 import { setAccessToken } from "@/lib/auth-token";
 import { ApplicationCopilot } from "@/components/application-copilot";
+import { AssistanceProvider } from "@/components/assistance-registry";
 
 interface AuthContextValue {
   roles: ReadonlySet<string>;
@@ -76,8 +77,10 @@ export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <AuthContext.Provider value={{ roles }}>
       <QueryClientProvider client={queryClient}>
-        {children}
-        <ApplicationCopilot />
+        <AssistanceProvider>
+          {children}
+          <ApplicationCopilot />
+        </AssistanceProvider>
       </QueryClientProvider>
     </AuthContext.Provider>
   );

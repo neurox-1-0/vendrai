@@ -118,6 +118,9 @@ The copilot should answer with case evidence and then offer:
 - “Guide me through the review.”
 
 Accept the guided action. The UI navigates and spotlights the correct component.
+Use Back and Next once, then explain that visible components register their own
+semantic help metadata; the tour is not a prerecorded cursor path or a
+hardcoded coordinate sequence.
 Then demonstrate a forbidden request:
 
 > Approve this case for me.
