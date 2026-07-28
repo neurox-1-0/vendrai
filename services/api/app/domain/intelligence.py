@@ -24,7 +24,20 @@ class SanctionsDatasetLike(Protocol):
 def string_similarity(left: str | None, right: str | None) -> float:
     if not left or not right:
         return 0.0
-    return SequenceMatcher(None, normalize_vendor_name(left), normalize_vendor_name(right)).ratio()
+    normalized_left = normalize_vendor_name(left)
+    normalized_right = normalize_vendor_name(right)
+    try:
+        from rapidfuzz import fuzz  # type: ignore[import-not-found]
+
+        return max(
+            fuzz.ratio(normalized_left, normalized_right),
+            fuzz.token_sort_ratio(normalized_left, normalized_right),
+            fuzz.token_set_ratio(normalized_left, normalized_right),
+        ) / 100
+    except ImportError:
+        # The production dependency is pinned, while this deterministic
+        # fallback keeps migrations and minimal test environments usable.
+        return SequenceMatcher(None, normalized_left, normalized_right).ratio()
 
 
 def score_duplicate(
