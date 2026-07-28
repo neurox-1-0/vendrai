@@ -17,6 +17,9 @@ langgraph==1.2.9
 langgraph-checkpoint-postgres==3.1.0
 boto3==1.43.56
 redis==8.0.1
+rapidfuzz==3.14.3
+scikit-learn==1.8.0
+skops==0.13.0
 opentelemetry-sdk==1.44.0
 opentelemetry-exporter-otlp-proto-http==1.44.0
 opentelemetry-instrumentation-fastapi==0.65b0

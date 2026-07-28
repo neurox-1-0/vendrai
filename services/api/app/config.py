@@ -105,6 +105,8 @@ class Settings(BaseSettings):
         "https://scsanctions.un.org/resources/xml/en/consolidated.xml"
     )
     SANCTIONS_EU_URL: str = ""
+    ALERT_EVALUATION_INTERVAL_SECONDS: int = 900
+    ALERT_TENANT_IDS: str = ""
 
     @model_validator(mode="after")
     def reject_unsafe_production_configuration(self) -> "Settings":

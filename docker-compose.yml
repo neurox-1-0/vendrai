@@ -375,6 +375,15 @@ services:
     command: ["python", "-m", "app.workers.notification"]
     depends_on: *worker-depends
 
+  alert-worker:
+    <<: *api-image
+    command: ["python", "-m", "app.workers.alerts"]
+    environment:
+      <<: *api-environment
+      ALERT_EVALUATION_INTERVAL_SECONDS: ${ALERT_EVALUATION_INTERVAL_SECONDS:-900}
+      ALERT_TENANT_IDS: ${ALERT_TENANT_IDS:-}
+    depends_on: *worker-depends
+
   sanctions-worker:
     <<: *api-image
     command: ["python", "-m", "app.workers.sanctions"]
