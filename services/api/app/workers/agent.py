@@ -39,6 +39,7 @@ from app.models import (
 )
 from app.services.events import append_audit, append_case_event, enqueue_event
 from app.services.live_progress import specialist_progress_callback
+from app.services.risk import upsert_risk_finding
 from app.workers.common import consume
 from app.workers.database import WorkerSession, set_worker_tenant
 from langgraph.types import Command
@@ -510,6 +511,42 @@ async def run_analysis(envelope: dict) -> None:
                     score=item["score"], signals=item["signals"],
                     review_required=item["review_required"],
                 ))
+            review_candidates = [
+                item for item in duplicate_items if item["review_required"]
+            ]
+            if review_candidates:
+                strongest = max(
+                    review_candidates, key=lambda item: item["score"]
+                )
+                await upsert_risk_finding(
+                    session,
+                    tenant_id=tenant_id,
+                    case_id=case_id,
+                    subject_type="VENDOR",
+                    subject_id=strongest["vendor_id"],
+                    finding_type="DUPLICATE_VENDOR",
+                    severity="HIGH",
+                    mode="ACTIVE",
+                    detector_key="vendor_entity_resolution",
+                    detector_version="2.0.0",
+                    score=float(strongest["score"]),
+                    threshold=0.70,
+                    reason_codes=["POSSIBLE_DUPLICATE"],
+                    feature_snapshot=strongest["signals"],
+                    explanation={
+                        "summary": (
+                            "Candidate generation uses normalized fuzzy name "
+                            "matching; exact tax or bank blind-index matches "
+                            "always require human review."
+                        )
+                    },
+                    evidence_refs=[
+                        {
+                            "source_type": "VENDOR_MASTER",
+                            "vendor_id": strongest["vendor_id"],
+                        }
+                    ],
+                )
             session.add(RiskCheck(
                 tenant_id=tenant_id, case_id=case_id, provider="LOCAL_OFFICIAL_LISTS",
                 dataset_versions={item.source: item.version for item in datasets},
