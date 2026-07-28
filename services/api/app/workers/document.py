@@ -26,6 +26,7 @@ from app.models import (
     InboxReceipt,
 )
 from app.services.events import append_case_event, enqueue_event
+from app.services.risk import upsert_risk_finding
 from app.services.storage import (
     copy_local_clean_object,
     delete_quarantined_object,
@@ -47,6 +48,72 @@ FIELD_PATTERNS = {
 }
 EMAIL_PATTERN = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.I)
 PHONE_PATTERN = re.compile(r"(?<!\w)(?:\+?\d[\d ()-]{7,}\d)(?!\w)")
+
+
+def confidence_grade(confidence: float | None) -> str:
+    if confidence is None:
+        return "UNKNOWN"
+    if confidence >= 0.90:
+        return "EXCELLENT"
+    if confidence >= 0.75:
+        return "GOOD"
+    if confidence >= 0.60:
+        return "FAIR"
+    return "POOR"
+
+
+def extraction_candidate(
+    pages: list[tuple[int, str, dict]],
+    field_name: str,
+    pattern: re.Pattern[str],
+) -> dict[str, Any] | None:
+    for page_number, text, layout in pages:
+        match = pattern.search(text)
+        if not match:
+            continue
+        raw = " ".join(match.group(1).split())
+        source_bbox: dict[str, Any] = {}
+        for item in layout.get("items", []):
+            item_text = str(item.get("text", ""))
+            if raw.lower() in item_text.lower() or item_text.lower() in raw.lower():
+                source_bbox = {"bbox": item.get("bbox")}
+                break
+        route = str(layout.get("route") or layout.get("parser") or "unknown")
+        route_confidence = layout.get("confidence")
+        confidence = (
+            float(route_confidence)
+            if isinstance(route_confidence, (int, float))
+            else 0.99
+            if route == "native"
+            else 0.85
+        )
+        validations = [{"rule": "NON_EMPTY", "passed": bool(raw)}]
+        if field_name == "swift_code":
+            validations.append(
+                {
+                    "rule": "SWIFT_LENGTH",
+                    "passed": bool(re.fullmatch(r"[A-Z0-9]{8,11}", raw, re.I)),
+                }
+            )
+        if field_name in {"tax_id", "bank_account"}:
+            validations.append(
+                {
+                    "rule": "CRITICAL_IDENTIFIER_LENGTH",
+                    "passed": 6 <= len(re.sub(r"\s+", "", raw)) <= 40,
+                }
+            )
+        if not all(item["passed"] for item in validations):
+            confidence = min(confidence, 0.59)
+        return {
+            "raw": raw,
+            "source_page": page_number,
+            "source_bbox": source_bbox,
+            "confidence": round(confidence, 4),
+            "confidence_grade": confidence_grade(confidence),
+            "validation_results": validations,
+            "extractor_version": "2.0.0",
+        }
+    return None
 
 
 def scan_with_clamav(path: Path) -> tuple[bool, str]:
@@ -332,7 +399,6 @@ async def process_document_event(envelope: dict) -> None:
             if not clean_storage_key:
                 raise RuntimeError("CLEAN_STORAGE_KEY_MISSING")
             document.storage_key = clean_storage_key
-            combined = "\n".join(text for _, text, _ in pages)
             for page_number, text, layout in pages:
                 session.add(DocumentPage(
                     tenant_id=tenant_id, document_id=document_id, page_number=page_number,
@@ -340,10 +406,10 @@ async def process_document_event(envelope: dict) -> None:
                     ocr_confidence=layout.get("confidence"),
                 ))
             for field_name, pattern in FIELD_PATTERNS.items():
-                match = pattern.search(combined)
-                if not match:
+                candidate = extraction_candidate(pages, field_name, pattern)
+                if not candidate:
                     continue
-                raw = " ".join(match.group(1).split())
+                raw = candidate["raw"]
                 sensitive = field_name in {"tax_id", "bank_account", "swift_code", "address"}
                 normalized = (
                     blind_index(raw, settings.BLIND_INDEX_SECRET).hex() if sensitive
@@ -353,10 +419,55 @@ async def process_document_event(envelope: dict) -> None:
                     tenant_id=tenant_id, document_id=document_id, field_name=field_name,
                     field_value_masked=f"<{field_name.upper()}>" if sensitive else raw,
                     field_value_ciphertext=encrypt_sensitive_value(raw, settings.DATA_ENCRYPTION_SECRET) if sensitive else None,
-                    normalized_value=normalized, confidence=0.95 if field_name in {"legal_name", "swift_code"} else 0.85,
-                    source_page=1, source_bbox={}, extractor_type="deterministic-regex",
-                    extractor_version="1.0.0", human_verified=False,
+                    normalized_value=normalized,
+                    confidence=candidate["confidence"],
+                    confidence_grade=candidate["confidence_grade"],
+                    validation_results=candidate["validation_results"],
+                    source_page=candidate["source_page"],
+                    source_bbox=candidate["source_bbox"],
+                    extractor_type="deterministic-regex",
+                    extractor_version=candidate["extractor_version"],
+                    human_verified=False,
                 ))
+                if (
+                    field_name in {"tax_id", "bank_account"}
+                    and candidate["confidence"] < 0.90
+                ):
+                    await upsert_risk_finding(
+                        session,
+                        tenant_id=tenant_id,
+                        case_id=case.case_id,
+                        subject_type="DOCUMENT",
+                        subject_id=str(document_id),
+                        finding_type="LOW_CONFIDENCE_EXTRACTION",
+                        severity="HIGH",
+                        mode="ACTIVE",
+                        detector_key=f"critical_field_confidence:{field_name}",
+                        detector_version="2.0.0",
+                        score=1 - candidate["confidence"],
+                        threshold=0.10,
+                        reason_codes=["OCR_HUMAN_CONFIRMATION_REQUIRED"],
+                        feature_snapshot={
+                            "field_name": field_name,
+                            "confidence": candidate["confidence"],
+                            "confidence_grade": candidate[
+                                "confidence_grade"
+                            ],
+                        },
+                        explanation={
+                            "summary": (
+                                "A critical identifier did not reach the "
+                                "unattended extraction confidence threshold."
+                            )
+                        },
+                        evidence_refs=[
+                            {
+                                "source_type": "DOCUMENT_PAGE",
+                                "document_id": str(document_id),
+                                "page": candidate["source_page"],
+                            }
+                        ],
+                    )
             document.processing_status = "READY"
             document.parser_version = parser_version
             await append_case_event(session, tenant_id=tenant_id, case_id=case.case_id, event_type="DOCUMENT_READY", actor_type="SYSTEM", actor_id="document-worker", payload={"document_id": str(document_id), "pages": len(pages)})

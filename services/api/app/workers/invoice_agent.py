@@ -15,6 +15,7 @@ from app.agents.planning import (
 from app.agents.workflow import tenant_workflow, workflow_config
 from app.config import settings
 from app.domain.cases import CaseStatus
+from app.domain.fraud import robust_mad_score
 from app.domain.security import canonical_hash, normalize_vendor_name
 from app.llm_gateway import LLMProviderError
 from app.models import (
@@ -40,6 +41,7 @@ from app.models import (
 )
 from app.services.events import append_audit, append_case_event, enqueue_event
 from app.services.live_progress import specialist_progress_callback
+from app.services.risk import upsert_risk_finding
 from app.workers.common import consume
 from app.workers.database import WorkerSession, set_worker_tenant
 from sqlalchemy import delete, func, select
@@ -1259,6 +1261,39 @@ async def run_invoice_analysis(envelope: dict[str, Any]) -> None:
                         "affected_lines": [],
                     }
                 )
+                await upsert_risk_finding(
+                    session,
+                    tenant_id=tenant_id,
+                    case_id=case_id,
+                    subject_type="INVOICE",
+                    subject_id=str(invoice_record.invoice_id),
+                    finding_type="DUPLICATE_INVOICE",
+                    severity="CRITICAL",
+                    mode="ACTIVE",
+                    detector_key="exact_invoice_identity",
+                    detector_version="1.0.0",
+                    score=1.0,
+                    threshold=1.0,
+                    reason_codes=["DUPLICATE_INVOICE"],
+                    feature_snapshot={
+                        "invoice_number_collision": True,
+                        "vendor_resolved": True,
+                    },
+                    explanation={
+                        "summary": (
+                            "The normalized invoice number already exists for "
+                            "the resolved vendor."
+                        )
+                    },
+                    evidence_refs=[
+                        {
+                            "source_type": "INVOICE_HISTORY",
+                            "invoice_number": extracted_invoice[
+                                "invoice_number"
+                            ],
+                        }
+                    ],
+                )
 
             bank_started_at = datetime.now(UTC)
             bank_started = time.perf_counter()
@@ -1285,6 +1320,40 @@ async def run_invoice_analysis(envelope: dict[str, Any]) -> None:
                         "mismatch_details": {"message": "Invoice bank blind index differs from vendor master."},
                         "affected_lines": [],
                     }
+                )
+                await upsert_risk_finding(
+                    session,
+                    tenant_id=tenant_id,
+                    case_id=case_id,
+                    subject_type="VENDOR",
+                    subject_id=str(vendor.vendor_id) if vendor else None,
+                    finding_type="BANK_ACCOUNT_CHANGE",
+                    severity="CRITICAL",
+                    mode="ACTIVE",
+                    detector_key="bank_blind_index_consistency",
+                    detector_version="1.0.0",
+                    score=1.0,
+                    threshold=1.0,
+                    reason_codes=["UNVERIFIED_BANK_ACCOUNT_CHANGE"],
+                    feature_snapshot={
+                        "bank_blind_index_match": False,
+                        "vendor_master_bank_available": bool(
+                            vendor and vendor.bank_account_hash
+                        ),
+                    },
+                    explanation={
+                        "summary": (
+                            "Invoice bank evidence differs from the last "
+                            "approved vendor-master blind index. This finding "
+                            "cannot be cleared by an ML score."
+                        )
+                    },
+                    evidence_refs=[
+                        {
+                            "source_type": "EXTRACTED_FIELD",
+                            "field_id": str(bank_field.extracted_field_id),
+                        }
+                    ],
                 )
             elif bank_unverified:
                 reason_codes.append("BANK_ACCOUNT_UNVERIFIED")
@@ -1365,6 +1434,95 @@ async def run_invoice_analysis(envelope: dict[str, Any]) -> None:
             )
             if not within_tolerance:
                 reason_codes.append("EXCEEDS_TOLERANCE")
+            historical_amounts = [
+                float(value)
+                for value in (
+                    await session.execute(
+                        select(InvoiceHistoryRecord.gross_amount).where(
+                            InvoiceHistoryRecord.tenant_id == tenant_id,
+                            InvoiceHistoryRecord.vendor_id
+                            == (vendor_result.get("vendor_id") or ""),
+                        )
+                    )
+                ).scalars()
+            ]
+            amount_anomaly = robust_mad_score(
+                float(invoice_record.total_amount),
+                historical_amounts,
+            )
+            price_variances = [
+                abs(float(line["price_variance"]))
+                for line in match_result["line_matches"]
+                if line["price_variance"] != 0
+            ]
+            quantity_variances = [
+                abs(float(line["quantity_variance"]))
+                for line in match_result["line_matches"]
+                if line["quantity_variance"] != 0
+            ]
+            if price_variances or amount_anomaly.anomalous:
+                await upsert_risk_finding(
+                    session,
+                    tenant_id=tenant_id,
+                    case_id=case_id,
+                    subject_type="INVOICE",
+                    subject_id=str(invoice_record.invoice_id),
+                    finding_type="PRICE_ANOMALY",
+                    severity="MEDIUM",
+                    mode="SHADOW",
+                    detector_key="robust_price_history",
+                    detector_version="1.0.0",
+                    score=amount_anomaly.score,
+                    threshold=amount_anomaly.threshold,
+                    reason_codes=["SHADOW_PRICE_ANOMALY"],
+                    feature_snapshot={
+                        "invoice_total": float(invoice_record.total_amount),
+                        "historical_sample_count": len(historical_amounts),
+                        "historical_median": amount_anomaly.median,
+                        "historical_mad": amount_anomaly.mad,
+                        "line_price_variances": price_variances,
+                    },
+                    explanation={"summary": amount_anomaly.explanation},
+                    evidence_refs=[
+                        {
+                            "source_type": "THREE_WAY_MATCH",
+                            "line_count": len(price_variances),
+                        }
+                    ],
+                )
+            if quantity_variances:
+                maximum_quantity_variance = max(quantity_variances)
+                await upsert_risk_finding(
+                    session,
+                    tenant_id=tenant_id,
+                    case_id=case_id,
+                    subject_type="INVOICE",
+                    subject_id=str(invoice_record.invoice_id),
+                    finding_type="QUANTITY_ANOMALY",
+                    severity="MEDIUM",
+                    mode="SHADOW",
+                    detector_key="quantity_receipt_deviation",
+                    detector_version="1.0.0",
+                    score=maximum_quantity_variance,
+                    threshold=0.0,
+                    reason_codes=["SHADOW_QUANTITY_ANOMALY"],
+                    feature_snapshot={
+                        "line_quantity_variances": quantity_variances,
+                        "missing_grn": missing_grn,
+                    },
+                    explanation={
+                        "summary": (
+                            "Quantity deviations are recorded in shadow mode; "
+                            "the deterministic PO/GRN control remains authoritative."
+                        )
+                    },
+                    evidence_refs=[
+                        {
+                            "source_type": "THREE_WAY_MATCH",
+                            "line_count": len(quantity_variances),
+                        }
+                    ],
+                )
             reason_codes = sorted(set(reason_codes or ["CLEAN_THREE_WAY_MATCH"]))
             policy_result = await _timed(
                 _policy_clauses(tenant_id, reason_codes)

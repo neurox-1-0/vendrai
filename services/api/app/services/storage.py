@@ -121,12 +121,18 @@ def presigned_download_url(key: str, filename: str) -> str:
 
 
 def store_private_export(key: str, payload: bytes) -> None:
+    store_private_artifact(key, payload, "application/json")
+
+
+def store_private_artifact(
+    key: str, payload: bytes, content_type: str
+) -> None:
     if settings.STORAGE_BACKEND == "s3":
         _s3_client().put_object(
             Bucket=settings.S3_DOCUMENT_BUCKET,
             Key=key,
             Body=payload,
-            ContentType="application/json",
+            ContentType=content_type,
             ServerSideEncryption="AES256",
         )
         return

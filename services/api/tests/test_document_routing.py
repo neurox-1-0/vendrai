@@ -49,3 +49,32 @@ def test_low_confidence_tesseract_page_uses_easyocr(monkeypatch):
     pages, _ = document.extract_document(Path("scan.pdf"), "application/pdf")
     assert pages[0][1] == "Fallback text"
     assert pages[0][2]["route"] == "easyocr-fallback"
+
+
+def test_extraction_candidate_preserves_page_bbox_confidence_and_validation():
+    candidate = document.extraction_candidate(
+        [
+            (
+                2,
+                "Account Number: 003-441-8821",
+                {
+                    "route": "tesseract",
+                    "confidence": 0.82,
+                    "items": [
+                        {
+                            "text": "003-441-8821",
+                            "bbox": [10, 20, 100, 35],
+                        }
+                    ],
+                },
+            )
+        ],
+        "bank_account",
+        document.FIELD_PATTERNS["bank_account"],
+    )
+    assert candidate
+    assert candidate["source_page"] == 2
+    assert candidate["source_bbox"]["bbox"] == [10, 20, 100, 35]
+    assert candidate["confidence"] == 0.82
+    assert candidate["confidence_grade"] == "GOOD"
+    assert all(item["passed"] for item in candidate["validation_results"])

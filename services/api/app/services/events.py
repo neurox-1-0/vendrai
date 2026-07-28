@@ -3,7 +3,7 @@ from typing import Any
 
 from app.domain.security import chained_audit_hash
 from app.event_contracts import validate_event_contract
-from app.models import AuditLog, CaseEvent, OutboxEvent
+from app.models import AuditLog, Case, CaseEvent, OutboxEvent
 from app.observability import current_traceparent
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,6 +22,10 @@ async def append_case_event(
     if db.bind and db.bind.dialect.name == "postgresql":
         await db.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"), {"key": f"case-event:{case_id}"})
     sequence = await db.scalar(select(func.coalesce(func.max(CaseEvent.sequence), 0) + 1).where(CaseEvent.case_id == case_id))
+    case = await db.get(Case, case_id)
+    event_payload = dict(payload)
+    if case and "case_status" not in event_payload:
+        event_payload["case_status"] = str(case.status)
     event = CaseEvent(
         tenant_id=tenant_id,
         case_id=case_id,
@@ -29,7 +33,7 @@ async def append_case_event(
         event_type=event_type,
         actor_type=actor_type,
         actor_id=actor_id,
-        payload=payload,
+        payload=event_payload,
     )
     db.add(event)
     return event

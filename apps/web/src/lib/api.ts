@@ -243,6 +243,96 @@ export interface Notification {
   created_at: string;
 }
 
+export type MetricKey =
+  | "invoice_stp_rate"
+  | "invoice_cycle_hours"
+  | "vendor_onboarding_cycle_hours"
+  | "vendor_activation_rate"
+  | "invoice_exception_rate"
+  | "pending_approval_count";
+
+export interface MetricValue {
+  key: MetricKey;
+  label: string;
+  value: number | null;
+  unit: "percent" | "hours" | "count";
+  numerator: number | null;
+  denominator: number | null;
+  previous_value: number | null;
+  definition: string;
+  statistics: Record<string, number | null>;
+}
+
+export interface AnalyticsSummary {
+  period_start: string;
+  period_end: string;
+  timezone: string;
+  metrics: MetricValue[];
+  approval_aging: Record<string, number>;
+  generated_at: string;
+}
+
+export interface MetricSeries {
+  key: MetricKey;
+  grain: "day" | "week";
+  points: Array<{
+    period_start: string;
+    value: number | null;
+    numerator: number | null;
+    denominator: number | null;
+  }>;
+}
+
+export interface ExceptionAnalytics {
+  items: Array<{
+    exception_type: string;
+    severity: string;
+    count: number;
+    open_count: number;
+  }>;
+  total: number;
+}
+
+export interface RiskFinding {
+  risk_finding_id: string;
+  case_id: string | null;
+  finding_type: string;
+  severity: string;
+  mode: "ACTIVE" | "SHADOW";
+  data_origin: string;
+  detector_key: string;
+  detector_version: string;
+  score: number | null;
+  threshold: number | null;
+  reason_codes: string[];
+  explanation: { summary?: string; [key: string]: unknown };
+  status: string;
+  disposition: string | null;
+  created_at: string;
+}
+
+export interface AlertInstance {
+  alert_instance_id: string;
+  alert_rule_id: string;
+  case_id: string | null;
+  risk_finding_id: string | null;
+  title: string;
+  body: string;
+  severity: string;
+  status: string;
+  metric_snapshot: Record<string, unknown>;
+  first_triggered_at: string;
+  acknowledged_at: string | null;
+}
+
+export interface AnalyticsAnswer {
+  answer: string;
+  query: { metric: MetricKey; start: string; end: string; grain: string };
+  metric: MetricValue;
+  citations: Array<{ label: string; detail: string }>;
+  provider: "GOVERNED_LOCAL" | "GEMINI_STRUCTURED";
+}
+
 export interface InitiatedUpload {
   document_id: string;
   upload_url: string;
@@ -379,6 +469,27 @@ function idempotencyKey(prefix: string): string {
 
 export const api = {
   listCases: () => request<CaseList>("/cases"),
+  getAnalyticsSummary: () =>
+    request<AnalyticsSummary>("/analytics/summary"),
+  getMetricSeries: (metric: MetricKey, grain: "day" | "week" = "week") =>
+    request<MetricSeries>(
+      `/analytics/timeseries?metric=${metric}&grain=${grain}`,
+    ),
+  getExceptionAnalytics: () =>
+    request<ExceptionAnalytics>("/analytics/exceptions"),
+  askAnalytics: (question: string) =>
+    request<AnalyticsAnswer>("/analytics/query", {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey("analytics-query") },
+      body: JSON.stringify({ question }),
+    }),
+  listRiskFindings: () => request<RiskFinding[]>("/risk-findings"),
+  listAlerts: () => request<AlertInstance[]>("/alerts"),
+  acknowledgeAlert: (alertId: string) =>
+    request<AlertInstance>(`/alerts/${alertId}:acknowledge`, {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey("alert-ack") },
+    }),
   getCase: (caseId: string) => request<VendorCase>(`/cases/${caseId}`),
   getEvents: (caseId: string) => request<CaseEvent[]>(`/cases/${caseId}/events`),
   getRunGraph: (runId: string) => request<RunGraph>(`/runs/${runId}/graph`),

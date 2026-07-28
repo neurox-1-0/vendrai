@@ -27,6 +27,15 @@ import type {
 import type {
   ActionAccepted,
   AgentStepResponse,
+  AlertInstanceResponse,
+  AlertRuleCreate,
+  AlertRuleResponse,
+  AlertRuleUpdate,
+  AnalyticsQuestionRequest,
+  AnalyticsQuestionResponse,
+  AnalyticsSummaryApiV1AnalyticsSummaryGetParams,
+  AnalyticsSummaryResponse,
+  AnalyticsTimeseriesApiV1AnalyticsTimeseriesGetParams,
   ApprovalDecisionRequest,
   ApprovalTaskResponse,
   AuditExportResponse,
@@ -45,6 +54,7 @@ import type {
   DocumentResponse,
   EventResponse,
   EvidenceResponse,
+  ExceptionAnalyticsResponse,
   ExtractedFieldResponse,
   FieldCorrectionRequest,
   GetWorkQueueApiV1WorkQueueGetParams,
@@ -57,9 +67,13 @@ import type {
   ListCasesApiV1CasesGetParams,
   ListClarificationTasksApiV1ClarificationTasksGetParams,
   ListReviewTasksApiV1ReviewTasksGetParams,
+  ListRiskFindingsApiV1RiskFindingsGetParams,
+  MetricSeries,
   NotificationResponse,
   PolicyResponse,
   PolicyUploadRequest,
+  RiskFindingDispositionRequest,
+  RiskFindingResponse,
   RunDiagnosticsResponse,
   RunGraphResponse,
   RunResponse,
@@ -555,6 +569,881 @@ export function useGetSanctionsImportApiV1AdminSanctionsImportsSanctionsImportId
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
   const queryOptions = getGetSanctionsImportApiV1AdminSanctionsImportsSanctionsImportIdGetQueryOptions(sanctionsImportId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getListAlertRulesApiV1AlertRulesGetUrl = () => {
+
+
+
+
+  return `/api/v1/alert-rules`
+}
+
+/**
+ * @summary List Alert Rules
+ */
+export const listAlertRulesApiV1AlertRulesGet = async ( options?: RequestInit): Promise<AlertRuleResponse[]> => {
+
+  return generatedClient<AlertRuleResponse[]>(getListAlertRulesApiV1AlertRulesGetUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListAlertRulesApiV1AlertRulesGetQueryKey = () => {
+    return [
+    `/api/v1/alert-rules`
+    ] as const;
+    }
+
+
+export const getListAlertRulesApiV1AlertRulesGetQueryOptions = <TData = Awaited<ReturnType<typeof listAlertRulesApiV1AlertRulesGet>>, TError = HTTPValidationError>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAlertRulesApiV1AlertRulesGet>>, TError, TData>>, request?: SecondParameter<typeof generatedClient>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListAlertRulesApiV1AlertRulesGetQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listAlertRulesApiV1AlertRulesGet>>> = ({ signal }) => listAlertRulesApiV1AlertRulesGet({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listAlertRulesApiV1AlertRulesGet>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListAlertRulesApiV1AlertRulesGetQueryResult = NonNullable<Awaited<ReturnType<typeof listAlertRulesApiV1AlertRulesGet>>>
+export type ListAlertRulesApiV1AlertRulesGetQueryError = HTTPValidationError
+
+
+export function useListAlertRulesApiV1AlertRulesGet<TData = Awaited<ReturnType<typeof listAlertRulesApiV1AlertRulesGet>>, TError = HTTPValidationError>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAlertRulesApiV1AlertRulesGet>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listAlertRulesApiV1AlertRulesGet>>,
+          TError,
+          Awaited<ReturnType<typeof listAlertRulesApiV1AlertRulesGet>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof generatedClient>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListAlertRulesApiV1AlertRulesGet<TData = Awaited<ReturnType<typeof listAlertRulesApiV1AlertRulesGet>>, TError = HTTPValidationError>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAlertRulesApiV1AlertRulesGet>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listAlertRulesApiV1AlertRulesGet>>,
+          TError,
+          Awaited<ReturnType<typeof listAlertRulesApiV1AlertRulesGet>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof generatedClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListAlertRulesApiV1AlertRulesGet<TData = Awaited<ReturnType<typeof listAlertRulesApiV1AlertRulesGet>>, TError = HTTPValidationError>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAlertRulesApiV1AlertRulesGet>>, TError, TData>>, request?: SecondParameter<typeof generatedClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary List Alert Rules
+ */
+
+export function useListAlertRulesApiV1AlertRulesGet<TData = Awaited<ReturnType<typeof listAlertRulesApiV1AlertRulesGet>>, TError = HTTPValidationError>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAlertRulesApiV1AlertRulesGet>>, TError, TData>>, request?: SecondParameter<typeof generatedClient>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListAlertRulesApiV1AlertRulesGetQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCreateAlertRuleApiV1AlertRulesPostUrl = () => {
+
+
+
+
+  return `/api/v1/alert-rules`
+}
+
+/**
+ * @summary Create Alert Rule
+ */
+export const createAlertRuleApiV1AlertRulesPost = async (alertRuleCreate: AlertRuleCreate, options?: RequestInit): Promise<AlertRuleResponse> => {
+
+  return generatedClient<AlertRuleResponse>(getCreateAlertRuleApiV1AlertRulesPostUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(alertRuleCreate)
+  }
+);}
+
+
+
+
+
+export const getCreateAlertRuleApiV1AlertRulesPostMutationOptions = <TError = HTTPValidationError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createAlertRuleApiV1AlertRulesPost>>, TError,{data: AlertRuleCreate}, TContext>, request?: SecondParameter<typeof generatedClient>}
+): UseMutationOptions<Awaited<ReturnType<typeof createAlertRuleApiV1AlertRulesPost>>, TError,{data: AlertRuleCreate}, TContext> => {
+
+const mutationKey = ['createAlertRuleApiV1AlertRulesPost'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createAlertRuleApiV1AlertRulesPost>>, {data: AlertRuleCreate}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createAlertRuleApiV1AlertRulesPost(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateAlertRuleApiV1AlertRulesPostMutationResult = NonNullable<Awaited<ReturnType<typeof createAlertRuleApiV1AlertRulesPost>>>
+    export type CreateAlertRuleApiV1AlertRulesPostMutationBody = AlertRuleCreate
+    export type CreateAlertRuleApiV1AlertRulesPostMutationError = HTTPValidationError
+
+    /**
+ * @summary Create Alert Rule
+ */
+export const useCreateAlertRuleApiV1AlertRulesPost = <TError = HTTPValidationError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createAlertRuleApiV1AlertRulesPost>>, TError,{data: AlertRuleCreate}, TContext>, request?: SecondParameter<typeof generatedClient>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createAlertRuleApiV1AlertRulesPost>>,
+        TError,
+        {data: AlertRuleCreate},
+        TContext
+      > => {
+      return useMutation(getCreateAlertRuleApiV1AlertRulesPostMutationOptions(options), queryClient);
+    }
+
+export const getUpdateAlertRuleApiV1AlertRulesAlertRuleIdPatchUrl = (alertRuleId: string,) => {
+
+
+
+
+  return `/api/v1/alert-rules/${alertRuleId}`
+}
+
+/**
+ * @summary Update Alert Rule
+ */
+export const updateAlertRuleApiV1AlertRulesAlertRuleIdPatch = async (alertRuleId: string,
+    alertRuleUpdate: AlertRuleUpdate, options?: RequestInit): Promise<AlertRuleResponse> => {
+
+  return generatedClient<AlertRuleResponse>(getUpdateAlertRuleApiV1AlertRulesAlertRuleIdPatchUrl(alertRuleId),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(alertRuleUpdate)
+  }
+);}
+
+
+
+
+
+export const getUpdateAlertRuleApiV1AlertRulesAlertRuleIdPatchMutationOptions = <TError = HTTPValidationError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateAlertRuleApiV1AlertRulesAlertRuleIdPatch>>, TError,{alertRuleId: string;data: AlertRuleUpdate}, TContext>, request?: SecondParameter<typeof generatedClient>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateAlertRuleApiV1AlertRulesAlertRuleIdPatch>>, TError,{alertRuleId: string;data: AlertRuleUpdate}, TContext> => {
+
+const mutationKey = ['updateAlertRuleApiV1AlertRulesAlertRuleIdPatch'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateAlertRuleApiV1AlertRulesAlertRuleIdPatch>>, {alertRuleId: string;data: AlertRuleUpdate}> = (props) => {
+          const {alertRuleId,data} = props ?? {};
+
+          return  updateAlertRuleApiV1AlertRulesAlertRuleIdPatch(alertRuleId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateAlertRuleApiV1AlertRulesAlertRuleIdPatchMutationResult = NonNullable<Awaited<ReturnType<typeof updateAlertRuleApiV1AlertRulesAlertRuleIdPatch>>>
+    export type UpdateAlertRuleApiV1AlertRulesAlertRuleIdPatchMutationBody = AlertRuleUpdate
+    export type UpdateAlertRuleApiV1AlertRulesAlertRuleIdPatchMutationError = HTTPValidationError
+
+    /**
+ * @summary Update Alert Rule
+ */
+export const useUpdateAlertRuleApiV1AlertRulesAlertRuleIdPatch = <TError = HTTPValidationError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateAlertRuleApiV1AlertRulesAlertRuleIdPatch>>, TError,{alertRuleId: string;data: AlertRuleUpdate}, TContext>, request?: SecondParameter<typeof generatedClient>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof updateAlertRuleApiV1AlertRulesAlertRuleIdPatch>>,
+        TError,
+        {alertRuleId: string;data: AlertRuleUpdate},
+        TContext
+      > => {
+      return useMutation(getUpdateAlertRuleApiV1AlertRulesAlertRuleIdPatchMutationOptions(options), queryClient);
+    }
+
+export const getListAlertsApiV1AlertsGetUrl = () => {
+
+
+
+
+  return `/api/v1/alerts`
+}
+
+/**
+ * @summary List Alerts
+ */
+export const listAlertsApiV1AlertsGet = async ( options?: RequestInit): Promise<AlertInstanceResponse[]> => {
+
+  return generatedClient<AlertInstanceResponse[]>(getListAlertsApiV1AlertsGetUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListAlertsApiV1AlertsGetQueryKey = () => {
+    return [
+    `/api/v1/alerts`
+    ] as const;
+    }
+
+
+export const getListAlertsApiV1AlertsGetQueryOptions = <TData = Awaited<ReturnType<typeof listAlertsApiV1AlertsGet>>, TError = HTTPValidationError>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAlertsApiV1AlertsGet>>, TError, TData>>, request?: SecondParameter<typeof generatedClient>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListAlertsApiV1AlertsGetQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listAlertsApiV1AlertsGet>>> = ({ signal }) => listAlertsApiV1AlertsGet({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listAlertsApiV1AlertsGet>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListAlertsApiV1AlertsGetQueryResult = NonNullable<Awaited<ReturnType<typeof listAlertsApiV1AlertsGet>>>
+export type ListAlertsApiV1AlertsGetQueryError = HTTPValidationError
+
+
+export function useListAlertsApiV1AlertsGet<TData = Awaited<ReturnType<typeof listAlertsApiV1AlertsGet>>, TError = HTTPValidationError>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAlertsApiV1AlertsGet>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listAlertsApiV1AlertsGet>>,
+          TError,
+          Awaited<ReturnType<typeof listAlertsApiV1AlertsGet>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof generatedClient>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListAlertsApiV1AlertsGet<TData = Awaited<ReturnType<typeof listAlertsApiV1AlertsGet>>, TError = HTTPValidationError>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAlertsApiV1AlertsGet>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listAlertsApiV1AlertsGet>>,
+          TError,
+          Awaited<ReturnType<typeof listAlertsApiV1AlertsGet>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof generatedClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListAlertsApiV1AlertsGet<TData = Awaited<ReturnType<typeof listAlertsApiV1AlertsGet>>, TError = HTTPValidationError>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAlertsApiV1AlertsGet>>, TError, TData>>, request?: SecondParameter<typeof generatedClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary List Alerts
+ */
+
+export function useListAlertsApiV1AlertsGet<TData = Awaited<ReturnType<typeof listAlertsApiV1AlertsGet>>, TError = HTTPValidationError>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAlertsApiV1AlertsGet>>, TError, TData>>, request?: SecondParameter<typeof generatedClient>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListAlertsApiV1AlertsGetQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getAcknowledgeAlertApiV1AlertsAlertInstanceIdAcknowledgePostUrl = (alertInstanceId: string,) => {
+
+
+
+
+  return `/api/v1/alerts/${alertInstanceId}:acknowledge`
+}
+
+/**
+ * @summary Acknowledge Alert
+ */
+export const acknowledgeAlertApiV1AlertsAlertInstanceIdAcknowledgePost = async (alertInstanceId: string, options?: RequestInit): Promise<AlertInstanceResponse> => {
+
+  return generatedClient<AlertInstanceResponse>(getAcknowledgeAlertApiV1AlertsAlertInstanceIdAcknowledgePostUrl(alertInstanceId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getAcknowledgeAlertApiV1AlertsAlertInstanceIdAcknowledgePostMutationOptions = <TError = HTTPValidationError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof acknowledgeAlertApiV1AlertsAlertInstanceIdAcknowledgePost>>, TError,{alertInstanceId: string}, TContext>, request?: SecondParameter<typeof generatedClient>}
+): UseMutationOptions<Awaited<ReturnType<typeof acknowledgeAlertApiV1AlertsAlertInstanceIdAcknowledgePost>>, TError,{alertInstanceId: string}, TContext> => {
+
+const mutationKey = ['acknowledgeAlertApiV1AlertsAlertInstanceIdAcknowledgePost'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof acknowledgeAlertApiV1AlertsAlertInstanceIdAcknowledgePost>>, {alertInstanceId: string}> = (props) => {
+          const {alertInstanceId} = props ?? {};
+
+          return  acknowledgeAlertApiV1AlertsAlertInstanceIdAcknowledgePost(alertInstanceId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AcknowledgeAlertApiV1AlertsAlertInstanceIdAcknowledgePostMutationResult = NonNullable<Awaited<ReturnType<typeof acknowledgeAlertApiV1AlertsAlertInstanceIdAcknowledgePost>>>
+
+    export type AcknowledgeAlertApiV1AlertsAlertInstanceIdAcknowledgePostMutationError = HTTPValidationError
+
+    /**
+ * @summary Acknowledge Alert
+ */
+export const useAcknowledgeAlertApiV1AlertsAlertInstanceIdAcknowledgePost = <TError = HTTPValidationError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof acknowledgeAlertApiV1AlertsAlertInstanceIdAcknowledgePost>>, TError,{alertInstanceId: string}, TContext>, request?: SecondParameter<typeof generatedClient>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof acknowledgeAlertApiV1AlertsAlertInstanceIdAcknowledgePost>>,
+        TError,
+        {alertInstanceId: string},
+        TContext
+      > => {
+      return useMutation(getAcknowledgeAlertApiV1AlertsAlertInstanceIdAcknowledgePostMutationOptions(options), queryClient);
+    }
+
+export const getEvaluateAlertsApiV1AlertsEvaluatePostUrl = () => {
+
+
+
+
+  return `/api/v1/alerts:evaluate`
+}
+
+/**
+ * @summary Evaluate Alerts
+ */
+export const evaluateAlertsApiV1AlertsEvaluatePost = async ( options?: RequestInit): Promise<AlertInstanceResponse[]> => {
+
+  return generatedClient<AlertInstanceResponse[]>(getEvaluateAlertsApiV1AlertsEvaluatePostUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getEvaluateAlertsApiV1AlertsEvaluatePostMutationOptions = <TError = HTTPValidationError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof evaluateAlertsApiV1AlertsEvaluatePost>>, TError,void, TContext>, request?: SecondParameter<typeof generatedClient>}
+): UseMutationOptions<Awaited<ReturnType<typeof evaluateAlertsApiV1AlertsEvaluatePost>>, TError,void, TContext> => {
+
+const mutationKey = ['evaluateAlertsApiV1AlertsEvaluatePost'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof evaluateAlertsApiV1AlertsEvaluatePost>>, void> = () => {
+
+
+          return  evaluateAlertsApiV1AlertsEvaluatePost(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type EvaluateAlertsApiV1AlertsEvaluatePostMutationResult = NonNullable<Awaited<ReturnType<typeof evaluateAlertsApiV1AlertsEvaluatePost>>>
+
+    export type EvaluateAlertsApiV1AlertsEvaluatePostMutationError = HTTPValidationError
+
+    /**
+ * @summary Evaluate Alerts
+ */
+export const useEvaluateAlertsApiV1AlertsEvaluatePost = <TError = HTTPValidationError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof evaluateAlertsApiV1AlertsEvaluatePost>>, TError,void, TContext>, request?: SecondParameter<typeof generatedClient>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof evaluateAlertsApiV1AlertsEvaluatePost>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getEvaluateAlertsApiV1AlertsEvaluatePostMutationOptions(options), queryClient);
+    }
+
+export const getAnalyticsExceptionsApiV1AnalyticsExceptionsGetUrl = () => {
+
+
+
+
+  return `/api/v1/analytics/exceptions`
+}
+
+/**
+ * @summary Analytics Exceptions
+ */
+export const analyticsExceptionsApiV1AnalyticsExceptionsGet = async ( options?: RequestInit): Promise<ExceptionAnalyticsResponse> => {
+
+  return generatedClient<ExceptionAnalyticsResponse>(getAnalyticsExceptionsApiV1AnalyticsExceptionsGetUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getAnalyticsExceptionsApiV1AnalyticsExceptionsGetQueryKey = () => {
+    return [
+    `/api/v1/analytics/exceptions`
+    ] as const;
+    }
+
+
+export const getAnalyticsExceptionsApiV1AnalyticsExceptionsGetQueryOptions = <TData = Awaited<ReturnType<typeof analyticsExceptionsApiV1AnalyticsExceptionsGet>>, TError = HTTPValidationError>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof analyticsExceptionsApiV1AnalyticsExceptionsGet>>, TError, TData>>, request?: SecondParameter<typeof generatedClient>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getAnalyticsExceptionsApiV1AnalyticsExceptionsGetQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof analyticsExceptionsApiV1AnalyticsExceptionsGet>>> = ({ signal }) => analyticsExceptionsApiV1AnalyticsExceptionsGet({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof analyticsExceptionsApiV1AnalyticsExceptionsGet>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type AnalyticsExceptionsApiV1AnalyticsExceptionsGetQueryResult = NonNullable<Awaited<ReturnType<typeof analyticsExceptionsApiV1AnalyticsExceptionsGet>>>
+export type AnalyticsExceptionsApiV1AnalyticsExceptionsGetQueryError = HTTPValidationError
+
+
+export function useAnalyticsExceptionsApiV1AnalyticsExceptionsGet<TData = Awaited<ReturnType<typeof analyticsExceptionsApiV1AnalyticsExceptionsGet>>, TError = HTTPValidationError>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof analyticsExceptionsApiV1AnalyticsExceptionsGet>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof analyticsExceptionsApiV1AnalyticsExceptionsGet>>,
+          TError,
+          Awaited<ReturnType<typeof analyticsExceptionsApiV1AnalyticsExceptionsGet>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof generatedClient>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useAnalyticsExceptionsApiV1AnalyticsExceptionsGet<TData = Awaited<ReturnType<typeof analyticsExceptionsApiV1AnalyticsExceptionsGet>>, TError = HTTPValidationError>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof analyticsExceptionsApiV1AnalyticsExceptionsGet>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof analyticsExceptionsApiV1AnalyticsExceptionsGet>>,
+          TError,
+          Awaited<ReturnType<typeof analyticsExceptionsApiV1AnalyticsExceptionsGet>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof generatedClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useAnalyticsExceptionsApiV1AnalyticsExceptionsGet<TData = Awaited<ReturnType<typeof analyticsExceptionsApiV1AnalyticsExceptionsGet>>, TError = HTTPValidationError>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof analyticsExceptionsApiV1AnalyticsExceptionsGet>>, TError, TData>>, request?: SecondParameter<typeof generatedClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Analytics Exceptions
+ */
+
+export function useAnalyticsExceptionsApiV1AnalyticsExceptionsGet<TData = Awaited<ReturnType<typeof analyticsExceptionsApiV1AnalyticsExceptionsGet>>, TError = HTTPValidationError>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof analyticsExceptionsApiV1AnalyticsExceptionsGet>>, TError, TData>>, request?: SecondParameter<typeof generatedClient>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getAnalyticsExceptionsApiV1AnalyticsExceptionsGetQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getAnalyticsQueryApiV1AnalyticsQueryPostUrl = () => {
+
+
+
+
+  return `/api/v1/analytics/query`
+}
+
+/**
+ * @summary Analytics Query
+ */
+export const analyticsQueryApiV1AnalyticsQueryPost = async (analyticsQuestionRequest: AnalyticsQuestionRequest, options?: RequestInit): Promise<AnalyticsQuestionResponse> => {
+
+  return generatedClient<AnalyticsQuestionResponse>(getAnalyticsQueryApiV1AnalyticsQueryPostUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(analyticsQuestionRequest)
+  }
+);}
+
+
+
+
+
+export const getAnalyticsQueryApiV1AnalyticsQueryPostMutationOptions = <TError = HTTPValidationError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof analyticsQueryApiV1AnalyticsQueryPost>>, TError,{data: AnalyticsQuestionRequest}, TContext>, request?: SecondParameter<typeof generatedClient>}
+): UseMutationOptions<Awaited<ReturnType<typeof analyticsQueryApiV1AnalyticsQueryPost>>, TError,{data: AnalyticsQuestionRequest}, TContext> => {
+
+const mutationKey = ['analyticsQueryApiV1AnalyticsQueryPost'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof analyticsQueryApiV1AnalyticsQueryPost>>, {data: AnalyticsQuestionRequest}> = (props) => {
+          const {data} = props ?? {};
+
+          return  analyticsQueryApiV1AnalyticsQueryPost(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AnalyticsQueryApiV1AnalyticsQueryPostMutationResult = NonNullable<Awaited<ReturnType<typeof analyticsQueryApiV1AnalyticsQueryPost>>>
+    export type AnalyticsQueryApiV1AnalyticsQueryPostMutationBody = AnalyticsQuestionRequest
+    export type AnalyticsQueryApiV1AnalyticsQueryPostMutationError = HTTPValidationError
+
+    /**
+ * @summary Analytics Query
+ */
+export const useAnalyticsQueryApiV1AnalyticsQueryPost = <TError = HTTPValidationError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof analyticsQueryApiV1AnalyticsQueryPost>>, TError,{data: AnalyticsQuestionRequest}, TContext>, request?: SecondParameter<typeof generatedClient>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof analyticsQueryApiV1AnalyticsQueryPost>>,
+        TError,
+        {data: AnalyticsQuestionRequest},
+        TContext
+      > => {
+      return useMutation(getAnalyticsQueryApiV1AnalyticsQueryPostMutationOptions(options), queryClient);
+    }
+
+export const getAnalyticsSummaryApiV1AnalyticsSummaryGetUrl = (params?: AnalyticsSummaryApiV1AnalyticsSummaryGetParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/v1/analytics/summary?${stringifiedParams}` : `/api/v1/analytics/summary`
+}
+
+/**
+ * @summary Analytics Summary
+ */
+export const analyticsSummaryApiV1AnalyticsSummaryGet = async (params?: AnalyticsSummaryApiV1AnalyticsSummaryGetParams, options?: RequestInit): Promise<AnalyticsSummaryResponse> => {
+
+  return generatedClient<AnalyticsSummaryResponse>(getAnalyticsSummaryApiV1AnalyticsSummaryGetUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getAnalyticsSummaryApiV1AnalyticsSummaryGetQueryKey = (params?: AnalyticsSummaryApiV1AnalyticsSummaryGetParams,) => {
+    return [
+    `/api/v1/analytics/summary`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getAnalyticsSummaryApiV1AnalyticsSummaryGetQueryOptions = <TData = Awaited<ReturnType<typeof analyticsSummaryApiV1AnalyticsSummaryGet>>, TError = HTTPValidationError>(params?: AnalyticsSummaryApiV1AnalyticsSummaryGetParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof analyticsSummaryApiV1AnalyticsSummaryGet>>, TError, TData>>, request?: SecondParameter<typeof generatedClient>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getAnalyticsSummaryApiV1AnalyticsSummaryGetQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof analyticsSummaryApiV1AnalyticsSummaryGet>>> = ({ signal }) => analyticsSummaryApiV1AnalyticsSummaryGet(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof analyticsSummaryApiV1AnalyticsSummaryGet>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type AnalyticsSummaryApiV1AnalyticsSummaryGetQueryResult = NonNullable<Awaited<ReturnType<typeof analyticsSummaryApiV1AnalyticsSummaryGet>>>
+export type AnalyticsSummaryApiV1AnalyticsSummaryGetQueryError = HTTPValidationError
+
+
+export function useAnalyticsSummaryApiV1AnalyticsSummaryGet<TData = Awaited<ReturnType<typeof analyticsSummaryApiV1AnalyticsSummaryGet>>, TError = HTTPValidationError>(
+ params: undefined |  AnalyticsSummaryApiV1AnalyticsSummaryGetParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof analyticsSummaryApiV1AnalyticsSummaryGet>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof analyticsSummaryApiV1AnalyticsSummaryGet>>,
+          TError,
+          Awaited<ReturnType<typeof analyticsSummaryApiV1AnalyticsSummaryGet>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof generatedClient>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useAnalyticsSummaryApiV1AnalyticsSummaryGet<TData = Awaited<ReturnType<typeof analyticsSummaryApiV1AnalyticsSummaryGet>>, TError = HTTPValidationError>(
+ params?: AnalyticsSummaryApiV1AnalyticsSummaryGetParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof analyticsSummaryApiV1AnalyticsSummaryGet>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof analyticsSummaryApiV1AnalyticsSummaryGet>>,
+          TError,
+          Awaited<ReturnType<typeof analyticsSummaryApiV1AnalyticsSummaryGet>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof generatedClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useAnalyticsSummaryApiV1AnalyticsSummaryGet<TData = Awaited<ReturnType<typeof analyticsSummaryApiV1AnalyticsSummaryGet>>, TError = HTTPValidationError>(
+ params?: AnalyticsSummaryApiV1AnalyticsSummaryGetParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof analyticsSummaryApiV1AnalyticsSummaryGet>>, TError, TData>>, request?: SecondParameter<typeof generatedClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Analytics Summary
+ */
+
+export function useAnalyticsSummaryApiV1AnalyticsSummaryGet<TData = Awaited<ReturnType<typeof analyticsSummaryApiV1AnalyticsSummaryGet>>, TError = HTTPValidationError>(
+ params?: AnalyticsSummaryApiV1AnalyticsSummaryGetParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof analyticsSummaryApiV1AnalyticsSummaryGet>>, TError, TData>>, request?: SecondParameter<typeof generatedClient>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getAnalyticsSummaryApiV1AnalyticsSummaryGetQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getAnalyticsTimeseriesApiV1AnalyticsTimeseriesGetUrl = (params: AnalyticsTimeseriesApiV1AnalyticsTimeseriesGetParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/v1/analytics/timeseries?${stringifiedParams}` : `/api/v1/analytics/timeseries`
+}
+
+/**
+ * @summary Analytics Timeseries
+ */
+export const analyticsTimeseriesApiV1AnalyticsTimeseriesGet = async (params: AnalyticsTimeseriesApiV1AnalyticsTimeseriesGetParams, options?: RequestInit): Promise<MetricSeries> => {
+
+  return generatedClient<MetricSeries>(getAnalyticsTimeseriesApiV1AnalyticsTimeseriesGetUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getAnalyticsTimeseriesApiV1AnalyticsTimeseriesGetQueryKey = (params?: AnalyticsTimeseriesApiV1AnalyticsTimeseriesGetParams,) => {
+    return [
+    `/api/v1/analytics/timeseries`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getAnalyticsTimeseriesApiV1AnalyticsTimeseriesGetQueryOptions = <TData = Awaited<ReturnType<typeof analyticsTimeseriesApiV1AnalyticsTimeseriesGet>>, TError = HTTPValidationError>(params: AnalyticsTimeseriesApiV1AnalyticsTimeseriesGetParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof analyticsTimeseriesApiV1AnalyticsTimeseriesGet>>, TError, TData>>, request?: SecondParameter<typeof generatedClient>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getAnalyticsTimeseriesApiV1AnalyticsTimeseriesGetQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof analyticsTimeseriesApiV1AnalyticsTimeseriesGet>>> = ({ signal }) => analyticsTimeseriesApiV1AnalyticsTimeseriesGet(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof analyticsTimeseriesApiV1AnalyticsTimeseriesGet>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type AnalyticsTimeseriesApiV1AnalyticsTimeseriesGetQueryResult = NonNullable<Awaited<ReturnType<typeof analyticsTimeseriesApiV1AnalyticsTimeseriesGet>>>
+export type AnalyticsTimeseriesApiV1AnalyticsTimeseriesGetQueryError = HTTPValidationError
+
+
+export function useAnalyticsTimeseriesApiV1AnalyticsTimeseriesGet<TData = Awaited<ReturnType<typeof analyticsTimeseriesApiV1AnalyticsTimeseriesGet>>, TError = HTTPValidationError>(
+ params: AnalyticsTimeseriesApiV1AnalyticsTimeseriesGetParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof analyticsTimeseriesApiV1AnalyticsTimeseriesGet>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof analyticsTimeseriesApiV1AnalyticsTimeseriesGet>>,
+          TError,
+          Awaited<ReturnType<typeof analyticsTimeseriesApiV1AnalyticsTimeseriesGet>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof generatedClient>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useAnalyticsTimeseriesApiV1AnalyticsTimeseriesGet<TData = Awaited<ReturnType<typeof analyticsTimeseriesApiV1AnalyticsTimeseriesGet>>, TError = HTTPValidationError>(
+ params: AnalyticsTimeseriesApiV1AnalyticsTimeseriesGetParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof analyticsTimeseriesApiV1AnalyticsTimeseriesGet>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof analyticsTimeseriesApiV1AnalyticsTimeseriesGet>>,
+          TError,
+          Awaited<ReturnType<typeof analyticsTimeseriesApiV1AnalyticsTimeseriesGet>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof generatedClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useAnalyticsTimeseriesApiV1AnalyticsTimeseriesGet<TData = Awaited<ReturnType<typeof analyticsTimeseriesApiV1AnalyticsTimeseriesGet>>, TError = HTTPValidationError>(
+ params: AnalyticsTimeseriesApiV1AnalyticsTimeseriesGetParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof analyticsTimeseriesApiV1AnalyticsTimeseriesGet>>, TError, TData>>, request?: SecondParameter<typeof generatedClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Analytics Timeseries
+ */
+
+export function useAnalyticsTimeseriesApiV1AnalyticsTimeseriesGet<TData = Awaited<ReturnType<typeof analyticsTimeseriesApiV1AnalyticsTimeseriesGet>>, TError = HTTPValidationError>(
+ params: AnalyticsTimeseriesApiV1AnalyticsTimeseriesGetParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof analyticsTimeseriesApiV1AnalyticsTimeseriesGet>>, TError, TData>>, request?: SecondParameter<typeof generatedClient>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getAnalyticsTimeseriesApiV1AnalyticsTimeseriesGetQueryOptions(params,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
@@ -3906,6 +4795,186 @@ export const useDecideReviewApiV1ReviewTasksTaskIdDecisionsPost = <TError = HTTP
         TContext
       > => {
       return useMutation(getDecideReviewApiV1ReviewTasksTaskIdDecisionsPostMutationOptions(options), queryClient);
+    }
+
+export const getListRiskFindingsApiV1RiskFindingsGetUrl = (params?: ListRiskFindingsApiV1RiskFindingsGetParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/v1/risk-findings?${stringifiedParams}` : `/api/v1/risk-findings`
+}
+
+/**
+ * @summary List Risk Findings
+ */
+export const listRiskFindingsApiV1RiskFindingsGet = async (params?: ListRiskFindingsApiV1RiskFindingsGetParams, options?: RequestInit): Promise<RiskFindingResponse[]> => {
+
+  return generatedClient<RiskFindingResponse[]>(getListRiskFindingsApiV1RiskFindingsGetUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListRiskFindingsApiV1RiskFindingsGetQueryKey = (params?: ListRiskFindingsApiV1RiskFindingsGetParams,) => {
+    return [
+    `/api/v1/risk-findings`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListRiskFindingsApiV1RiskFindingsGetQueryOptions = <TData = Awaited<ReturnType<typeof listRiskFindingsApiV1RiskFindingsGet>>, TError = HTTPValidationError>(params?: ListRiskFindingsApiV1RiskFindingsGetParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRiskFindingsApiV1RiskFindingsGet>>, TError, TData>>, request?: SecondParameter<typeof generatedClient>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListRiskFindingsApiV1RiskFindingsGetQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listRiskFindingsApiV1RiskFindingsGet>>> = ({ signal }) => listRiskFindingsApiV1RiskFindingsGet(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listRiskFindingsApiV1RiskFindingsGet>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListRiskFindingsApiV1RiskFindingsGetQueryResult = NonNullable<Awaited<ReturnType<typeof listRiskFindingsApiV1RiskFindingsGet>>>
+export type ListRiskFindingsApiV1RiskFindingsGetQueryError = HTTPValidationError
+
+
+export function useListRiskFindingsApiV1RiskFindingsGet<TData = Awaited<ReturnType<typeof listRiskFindingsApiV1RiskFindingsGet>>, TError = HTTPValidationError>(
+ params: undefined |  ListRiskFindingsApiV1RiskFindingsGetParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRiskFindingsApiV1RiskFindingsGet>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listRiskFindingsApiV1RiskFindingsGet>>,
+          TError,
+          Awaited<ReturnType<typeof listRiskFindingsApiV1RiskFindingsGet>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof generatedClient>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListRiskFindingsApiV1RiskFindingsGet<TData = Awaited<ReturnType<typeof listRiskFindingsApiV1RiskFindingsGet>>, TError = HTTPValidationError>(
+ params?: ListRiskFindingsApiV1RiskFindingsGetParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRiskFindingsApiV1RiskFindingsGet>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listRiskFindingsApiV1RiskFindingsGet>>,
+          TError,
+          Awaited<ReturnType<typeof listRiskFindingsApiV1RiskFindingsGet>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof generatedClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListRiskFindingsApiV1RiskFindingsGet<TData = Awaited<ReturnType<typeof listRiskFindingsApiV1RiskFindingsGet>>, TError = HTTPValidationError>(
+ params?: ListRiskFindingsApiV1RiskFindingsGetParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRiskFindingsApiV1RiskFindingsGet>>, TError, TData>>, request?: SecondParameter<typeof generatedClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary List Risk Findings
+ */
+
+export function useListRiskFindingsApiV1RiskFindingsGet<TData = Awaited<ReturnType<typeof listRiskFindingsApiV1RiskFindingsGet>>, TError = HTTPValidationError>(
+ params?: ListRiskFindingsApiV1RiskFindingsGetParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRiskFindingsApiV1RiskFindingsGet>>, TError, TData>>, request?: SecondParameter<typeof generatedClient>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListRiskFindingsApiV1RiskFindingsGetQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getDispositionRiskFindingApiV1RiskFindingsRiskFindingIdDispositionPostUrl = (riskFindingId: string,) => {
+
+
+
+
+  return `/api/v1/risk-findings/${riskFindingId}:disposition`
+}
+
+/**
+ * @summary Disposition Risk Finding
+ */
+export const dispositionRiskFindingApiV1RiskFindingsRiskFindingIdDispositionPost = async (riskFindingId: string,
+    riskFindingDispositionRequest: RiskFindingDispositionRequest, options?: RequestInit): Promise<RiskFindingResponse> => {
+
+  return generatedClient<RiskFindingResponse>(getDispositionRiskFindingApiV1RiskFindingsRiskFindingIdDispositionPostUrl(riskFindingId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(riskFindingDispositionRequest)
+  }
+);}
+
+
+
+
+
+export const getDispositionRiskFindingApiV1RiskFindingsRiskFindingIdDispositionPostMutationOptions = <TError = HTTPValidationError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof dispositionRiskFindingApiV1RiskFindingsRiskFindingIdDispositionPost>>, TError,{riskFindingId: string;data: RiskFindingDispositionRequest}, TContext>, request?: SecondParameter<typeof generatedClient>}
+): UseMutationOptions<Awaited<ReturnType<typeof dispositionRiskFindingApiV1RiskFindingsRiskFindingIdDispositionPost>>, TError,{riskFindingId: string;data: RiskFindingDispositionRequest}, TContext> => {
+
+const mutationKey = ['dispositionRiskFindingApiV1RiskFindingsRiskFindingIdDispositionPost'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof dispositionRiskFindingApiV1RiskFindingsRiskFindingIdDispositionPost>>, {riskFindingId: string;data: RiskFindingDispositionRequest}> = (props) => {
+          const {riskFindingId,data} = props ?? {};
+
+          return  dispositionRiskFindingApiV1RiskFindingsRiskFindingIdDispositionPost(riskFindingId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DispositionRiskFindingApiV1RiskFindingsRiskFindingIdDispositionPostMutationResult = NonNullable<Awaited<ReturnType<typeof dispositionRiskFindingApiV1RiskFindingsRiskFindingIdDispositionPost>>>
+    export type DispositionRiskFindingApiV1RiskFindingsRiskFindingIdDispositionPostMutationBody = RiskFindingDispositionRequest
+    export type DispositionRiskFindingApiV1RiskFindingsRiskFindingIdDispositionPostMutationError = HTTPValidationError
+
+    /**
+ * @summary Disposition Risk Finding
+ */
+export const useDispositionRiskFindingApiV1RiskFindingsRiskFindingIdDispositionPost = <TError = HTTPValidationError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof dispositionRiskFindingApiV1RiskFindingsRiskFindingIdDispositionPost>>, TError,{riskFindingId: string;data: RiskFindingDispositionRequest}, TContext>, request?: SecondParameter<typeof generatedClient>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof dispositionRiskFindingApiV1RiskFindingsRiskFindingIdDispositionPost>>,
+        TError,
+        {riskFindingId: string;data: RiskFindingDispositionRequest},
+        TContext
+      > => {
+      return useMutation(getDispositionRiskFindingApiV1RiskFindingsRiskFindingIdDispositionPostMutationOptions(options), queryClient);
     }
 
 export const getGetRunApiV1RunsRunIdGetUrl = (runId: string,) => {

@@ -427,6 +427,10 @@ async def correct_document_field(
             else body.value.upper()
         )
     field.confidence = 1.0
+    field.confidence_grade = "EXCELLENT"
+    field.validation_results = [
+        {"rule": "HUMAN_VERIFIED", "passed": True}
+    ]
     field.human_verified = True
     field.extractor_type = "human-correction"
     field.extractor_version = "1.0.0"

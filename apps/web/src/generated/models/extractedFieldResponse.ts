@@ -6,9 +6,11 @@
  * OpenAPI spec version: 1.0.0
  */
 import type { ExtractedFieldResponseSourceBbox } from './extractedFieldResponseSourceBbox';
+import type { ExtractedFieldResponseValidationResultsItem } from './extractedFieldResponseValidationResultsItem';
 
 export interface ExtractedFieldResponse {
   confidence: number | null;
+  confidence_grade: string;
   document_id: string;
   extracted_field_id: string;
   extractor_type: string;
@@ -19,4 +21,5 @@ export interface ExtractedFieldResponse {
   source_bbox: ExtractedFieldResponseSourceBbox;
   source_page: number | null;
   updated_at: string;
+  validation_results: ExtractedFieldResponseValidationResultsItem[];
 }
