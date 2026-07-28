@@ -13,6 +13,11 @@ NeuroX currently contains an evidence-driven supplier-onboarding platform and a 
   duplicate/sanctions/policy investigation and durable approval interruption.
 - `invoice-worker`: validated planning, parallel PO/GRN/vendor retrieval,
   deterministic matching, policy evidence and durable invoice approval.
+- `alert-worker`: evaluates tenant-scoped SLA and fraud rules every 15 minutes,
+  deduplicates alert instances and reuses durable notification delivery.
+- `/api/v1/analytics`, `/risk-findings`, `/alert-rules` and `/alerts`: expose
+  server-derived KPIs, governed metric questions, explainable active/shadow
+  findings and auditable alert operations.
 - `notification-worker`: independent in-app/email delivery and delayed retries.
 - `erp-worker` / `mock-erp`: evidence-bound, idempotent vendor creation.
 - `opa`: fail-closed authorization for every ERP write using state, evidence,
@@ -31,6 +36,10 @@ but has no workflow-mutation capability.
 ## Local setup
 
 Requirements: Docker Compose, Node.js 22.18+ and Python 3.12+.
+
+For complete macOS, Linux and Windows/WSL2 setup, provider choices, health
+checks, synthetic browser journeys, automated tests and troubleshooting, see
+[`RUN_PROJECT.md`](./RUN_PROJECT.md).
 
 ```bash
 ./scripts/bootstrap-local-env.sh
