@@ -139,6 +139,12 @@ class ExtractedField(Base, TimestampMixin):
     field_value_ciphertext: Mapped[bytes | None] = mapped_column(LargeBinary)
     normalized_value: Mapped[str | None] = mapped_column(Text)
     confidence: Mapped[float | None]
+    confidence_grade: Mapped[str] = mapped_column(
+        String(20), default="UNKNOWN"
+    )
+    validation_results: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONType, default=list
+    )
     source_page: Mapped[int | None]
     source_bbox: Mapped[dict[str, Any]] = mapped_column(JSONType, default=dict)
     extractor_type: Mapped[str] = mapped_column(String(80))
@@ -648,6 +654,140 @@ class RiskCheck(Base, TimestampMixin):
     status: Mapped[str] = mapped_column(String(30))
     disposition: Mapped[str] = mapped_column(String(40))
     result: Mapped[dict[str, Any]] = mapped_column(JSONType, default=dict)
+
+
+class RiskFinding(Base, TimestampMixin):
+    __tablename__ = "risk_findings"
+    __table_args__ = (
+        Index(
+            "ix_risk_findings_tenant_status_created",
+            "tenant_id",
+            "status",
+            "created_at",
+        ),
+        Index(
+            "ix_risk_findings_tenant_type_severity",
+            "tenant_id",
+            "finding_type",
+            "severity",
+        ),
+    )
+    risk_finding_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, primary_key=True, default=uuid.uuid4
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tenants.tenant_id"), index=True
+    )
+    case_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("cases.case_id", ondelete="CASCADE"), index=True
+    )
+    subject_type: Mapped[str] = mapped_column(String(30))
+    subject_id: Mapped[str | None] = mapped_column(Text)
+    finding_type: Mapped[str] = mapped_column(String(50))
+    severity: Mapped[str] = mapped_column(String(20), default="MEDIUM")
+    mode: Mapped[str] = mapped_column(String(20), default="ACTIVE")
+    data_origin: Mapped[str] = mapped_column(String(20), default="PRODUCTION")
+    detector_key: Mapped[str] = mapped_column(String(100))
+    detector_version: Mapped[str] = mapped_column(String(80))
+    model_version_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("model_versions.model_version_id")
+    )
+    score: Mapped[float | None]
+    threshold: Mapped[float | None]
+    reason_codes: Mapped[list[str]] = mapped_column(JSONType, default=list)
+    feature_snapshot: Mapped[dict[str, Any]] = mapped_column(
+        JSONType, default=dict
+    )
+    explanation: Mapped[dict[str, Any]] = mapped_column(JSONType, default=dict)
+    evidence_refs: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONType, default=list
+    )
+    status: Mapped[str] = mapped_column(String(30), default="OPEN")
+    disposition: Mapped[str | None] = mapped_column(String(30))
+    disposition_reason: Mapped[str | None] = mapped_column(Text)
+    reviewed_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.user_id")
+    )
+    reviewed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+
+
+class AlertRule(Base, TimestampMixin):
+    __tablename__ = "alert_rules"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "rule_key"),
+        Index("ix_alert_rules_tenant_enabled", "tenant_id", "enabled"),
+    )
+    alert_rule_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, primary_key=True, default=uuid.uuid4
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tenants.tenant_id"), index=True
+    )
+    rule_key: Mapped[str] = mapped_column(String(100))
+    name: Mapped[str] = mapped_column(String(160))
+    description: Mapped[str] = mapped_column(Text)
+    rule_type: Mapped[str] = mapped_column(String(50))
+    configuration: Mapped[dict[str, Any]] = mapped_column(
+        JSONType, default=dict
+    )
+    severity: Mapped[str] = mapped_column(String(20), default="MEDIUM")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+
+
+class AlertInstance(Base, TimestampMixin):
+    __tablename__ = "alert_instances"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "deduplication_key"),
+        Index(
+            "ix_alert_instances_tenant_status_created",
+            "tenant_id",
+            "status",
+            "created_at",
+        ),
+    )
+    alert_instance_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, primary_key=True, default=uuid.uuid4
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tenants.tenant_id"), index=True
+    )
+    alert_rule_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("alert_rules.alert_rule_id", ondelete="CASCADE"), index=True
+    )
+    case_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("cases.case_id", ondelete="CASCADE"), index=True
+    )
+    risk_finding_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("risk_findings.risk_finding_id", ondelete="SET NULL"),
+        index=True,
+    )
+    deduplication_key: Mapped[str] = mapped_column(String(180))
+    title: Mapped[str] = mapped_column(String(200))
+    body: Mapped[str] = mapped_column(Text)
+    severity: Mapped[str] = mapped_column(String(20), default="MEDIUM")
+    status: Mapped[str] = mapped_column(String(30), default="OPEN")
+    grouping_key: Mapped[str | None] = mapped_column(String(120))
+    metric_snapshot: Mapped[dict[str, Any]] = mapped_column(
+        JSONType, default=dict
+    )
+    first_triggered_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    last_triggered_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    acknowledged_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.user_id")
+    )
+    acknowledged_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    resolved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
 
 
 class ClarificationTask(Base, TimestampMixin):

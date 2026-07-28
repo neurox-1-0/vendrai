@@ -13,6 +13,8 @@ from app.database import engine
 from app.observability import configure_observability
 from app.routers import (
     admin,
+    alerts,
+    analytics,
     approvals,
     audit_exports,
     cases,
@@ -24,6 +26,7 @@ from app.routers import (
     knowledge,
     notifications,
     reviews,
+    risk_findings,
     runs,
     work_queue,
 )
@@ -44,7 +47,25 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type", "Idempotency-Key", "If-Match", "Last-Event-ID", "X-Dev-Tenant-Id", "X-Dev-User-Id", "X-Dev-Roles"],
 )
 
-for router in (cases.router, documents.router, runs.router, approvals.router, reviews.router, work_queue.router, evidence.router, audit_exports.router, notifications.router, knowledge.router, clarifications.router, invoices.router, copilot.router, admin.router):
+for router in (
+    cases.router,
+    documents.router,
+    runs.router,
+    approvals.router,
+    reviews.router,
+    work_queue.router,
+    evidence.router,
+    audit_exports.router,
+    notifications.router,
+    knowledge.router,
+    clarifications.router,
+    invoices.router,
+    copilot.router,
+    analytics.router,
+    risk_findings.router,
+    alerts.router,
+    admin.router,
+):
     app.include_router(
         router,
         prefix=settings.API_PREFIX,

@@ -115,6 +115,8 @@ class ExtractedFieldResponse(BaseModel):
     field_name: str
     field_value_masked: str | None
     confidence: float | None
+    confidence_grade: str
+    validation_results: list[dict[str, Any]]
     source_page: int | None
     source_bbox: dict[str, Any]
     extractor_type: str
@@ -502,3 +504,217 @@ class InvoiceDraftRequest(BaseModel):
     @classmethod
     def clean_invoice_number(cls, value: str) -> str:
         return " ".join(value.split())
+
+
+MetricKey = Literal[
+    "invoice_stp_rate",
+    "invoice_cycle_hours",
+    "vendor_onboarding_cycle_hours",
+    "vendor_activation_rate",
+    "invoice_exception_rate",
+    "pending_approval_count",
+]
+
+
+class MetricValue(BaseModel):
+    key: MetricKey
+    label: str
+    value: float | None
+    unit: Literal["percent", "hours", "count"]
+    numerator: int | None = None
+    denominator: int | None = None
+    previous_value: float | None = None
+    definition: str
+    statistics: dict[str, float | None] = Field(default_factory=dict)
+
+
+class AnalyticsSummaryResponse(BaseModel):
+    period_start: datetime
+    period_end: datetime
+    timezone: str
+    metrics: list[MetricValue]
+    approval_aging: dict[str, int]
+    generated_at: datetime
+
+
+class MetricPoint(BaseModel):
+    period_start: datetime
+    value: float | None
+    numerator: int | None = None
+    denominator: int | None = None
+
+
+class MetricSeries(BaseModel):
+    key: MetricKey
+    grain: Literal["day", "week"]
+    points: list[MetricPoint]
+
+
+class MetricQuery(BaseModel):
+    metric: MetricKey
+    start: datetime | None = None
+    end: datetime | None = None
+    case_type: Literal["INVOICE_EXCEPTION", "VENDOR_ONBOARDING"] | None = None
+    grain: Literal["day", "week"] = "week"
+
+
+class AnalyticsQuestionRequest(BaseModel):
+    question: str = Field(min_length=3, max_length=500)
+
+    @field_validator("question")
+    @classmethod
+    def mask_question(cls, value: str) -> str:
+        return mask_sensitive_text(" ".join(value.split()))
+
+
+class AnalyticsQuestionResponse(BaseModel):
+    answer: str
+    query: MetricQuery
+    metric: MetricValue
+    citations: list[dict[str, str]]
+    provider: Literal["GOVERNED_LOCAL", "GEMINI_STRUCTURED"]
+
+
+class ExceptionBreakdown(BaseModel):
+    exception_type: str
+    severity: str
+    count: int
+    open_count: int
+
+
+class ExceptionAnalyticsResponse(BaseModel):
+    items: list[ExceptionBreakdown]
+    total: int
+
+
+RiskFindingType = Literal[
+    "DUPLICATE_VENDOR",
+    "DUPLICATE_INVOICE",
+    "PRICE_ANOMALY",
+    "QUANTITY_ANOMALY",
+    "BANK_ACCOUNT_CHANGE",
+    "VENDOR_MISMATCH",
+    "LOW_CONFIDENCE_EXTRACTION",
+    "MULTIPLE_EXCEPTIONS",
+]
+RiskFindingMode = Literal["ACTIVE", "SHADOW"]
+RiskFindingDisposition = Literal[
+    "CONFIRMED",
+    "FALSE_POSITIVE",
+    "ACCEPTED_RISK",
+    "ESCALATED",
+]
+
+
+class RiskFindingResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    risk_finding_id: UUID
+    case_id: UUID | None
+    subject_type: str
+    subject_id: str | None
+    finding_type: str
+    severity: str
+    mode: str
+    data_origin: str
+    detector_key: str
+    detector_version: str
+    score: float | None
+    threshold: float | None
+    reason_codes: list[str]
+    feature_snapshot: dict[str, Any]
+    explanation: dict[str, Any]
+    evidence_refs: list[dict[str, Any]]
+    status: str
+    disposition: str | None
+    disposition_reason: str | None
+    reviewed_by: UUID | None
+    reviewed_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class RiskFindingDispositionRequest(BaseModel):
+    disposition: RiskFindingDisposition
+    reason: str = Field(min_length=3, max_length=1000)
+
+    @field_validator("reason")
+    @classmethod
+    def mask_reason(cls, value: str) -> str:
+        return mask_sensitive_text(" ".join(value.split()))
+
+
+class AlertRuleCreate(BaseModel):
+    rule_key: str = Field(
+        min_length=3, max_length=100, pattern=r"^[A-Z0-9_]+$"
+    )
+    name: str = Field(min_length=3, max_length=160)
+    description: str = Field(min_length=3, max_length=1000)
+    rule_type: Literal[
+        "EXCEPTION_AGING",
+        "APPROVAL_AGING",
+        "RISK_FINDING",
+        "EXTRACTION_FAILURE",
+    ]
+    configuration: dict[str, Any] = Field(default_factory=dict)
+    severity: Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"] = "MEDIUM"
+    enabled: bool = True
+
+
+class AlertRuleUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=3, max_length=160)
+    description: str | None = Field(
+        default=None, min_length=3, max_length=1000
+    )
+    configuration: dict[str, Any] | None = None
+    severity: Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"] | None = None
+    enabled: bool | None = None
+
+
+class AlertRuleResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    alert_rule_id: UUID
+    rule_key: str
+    name: str
+    description: str
+    rule_type: str
+    configuration: dict[str, Any]
+    severity: str
+    enabled: bool
+    version: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class AlertInstanceResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    alert_instance_id: UUID
+    alert_rule_id: UUID
+    case_id: UUID | None
+    risk_finding_id: UUID | None
+    title: str
+    body: str
+    severity: str
+    status: str
+    grouping_key: str | None
+    metric_snapshot: dict[str, Any]
+    first_triggered_at: datetime
+    last_triggered_at: datetime
+    acknowledged_by: UUID | None
+    acknowledged_at: datetime | None
+    resolved_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ExtractionCandidate(BaseModel):
+    field_name: str
+    value_masked: str | None
+    normalized_value: str | None
+    source_page: int | None
+    source_bbox: dict[str, Any] = Field(default_factory=dict)
+    extractor_type: str
+    extractor_version: str
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    confidence_grade: Literal["POOR", "FAIR", "GOOD", "EXCELLENT", "UNKNOWN"]
+    validations: list[dict[str, Any]] = Field(default_factory=list)
+    human_verified: bool = False
