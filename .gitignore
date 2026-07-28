@@ -18,9 +18,10 @@ Proposal/*
 Project Plan/
 Database Schema/
 
-# Ignore all markdown files except README, CURRENT_STATUS, and MASTER_TODO
+# Ignore local markdown notes except maintained project documentation
 *.md
 !README.md
+!AUDIT.md
 !CURRENT_STATUS.md
 !MASTER_TODO.md
 !LOG.md
