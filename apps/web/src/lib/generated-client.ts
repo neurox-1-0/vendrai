@@ -3,6 +3,9 @@ import { getAccessToken } from "@/lib/auth-token";
 const API_BASE = (
   process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api/v1"
 ).replace(/\/$/, "");
+// Generated paths (from the OpenAPI spec) already include the /api/v1
+// prefix, so requests must be joined against the origin, not API_BASE.
+const API_ORIGIN = new URL(API_BASE).origin;
 const DEV_TENANT =
   process.env.NEXT_PUBLIC_DEV_TENANT_ID ??
   "00000000-0000-0000-0000-000000000001";
@@ -26,7 +29,7 @@ export async function generatedClient<T>(
       "requester,analyst,approver,auditor,admin",
     );
   }
-  const response = await fetch(`${API_BASE}${path}`, {
+  const response = await fetch(`${API_ORIGIN}${path}`, {
     ...options,
     headers,
     cache: "no-store",

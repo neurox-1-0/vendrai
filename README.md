@@ -39,7 +39,8 @@ Requirements: Docker Compose, Node.js 22.18+ and Python 3.12+.
 
 For complete macOS, Linux and Windows/WSL2 setup, provider choices, health
 checks, synthetic browser journeys, automated tests and troubleshooting, see
-[`RUN_PROJECT.md`](./RUN_PROJECT.md).
+[`RUN_PROJECT.md`](./RUN_PROJECT.md). To run without Docker at all (Windows),
+see [Native Windows setup (no Docker)](#native-windows-setup-no-docker) below.
 
 ```bash
 ./scripts/bootstrap-local-env.sh
@@ -71,6 +72,145 @@ The product command bootstraps synthetic users from secrets in `.env`; it does
 not commit passwords. Set `AUTH_MODE=keycloak` for role acceptance.
 `AUTH_MODE=development` is restricted to local engineering. Production
 configuration rejects development authentication and placeholder credentials.
+
+## Native Windows setup (no Docker)
+
+Docker Compose is the supported path. Running fully natively is possible but
+manual: every infra service in `docker-compose.yml` is installed and
+configured directly on Windows instead of containerized, and PowerShell (not
+WSL2/Bash) drives it.
+
+### 1. Install the native binaries
+
+| Component | Install | Version (matches `docker-compose.yml`) |
+|---|---|---|
+| PostgreSQL | `winget install PostgreSQL.PostgreSQL.18` (or any PG16+) | — |
+| Redis | `winget install Redis` (or any native Windows build) | — |
+| Python | `winget install Python.Python.3.12` | 3.12 |
+| Erlang/OTP | `winget install Erlang.ErlangOTP` (RabbitMQ dependency) | any |
+| RabbitMQ | download `rabbitmq-server-*.exe` from the [releases page](https://github.com/rabbitmq/rabbitmq-server/releases) and run the installer | 3.13.x (see caveat below) |
+| Qdrant | download `qdrant-x86_64-pc-windows-msvc.zip` from [releases](https://github.com/qdrant/qdrant/releases), extract `qdrant.exe` | v1.14.1 |
+| MinIO + mc | download `minio.exe` and `mc.exe` from [dl.min.io](https://dl.min.io) (server + client, windows-amd64) | matches compose `RELEASE` tag |
+| OPA | download `opa_windows_amd64.exe` from [releases](https://github.com/open-policy-agent/opa/releases) | v1.5.1 |
+| Mailpit | `winget install axllent.mailpit` | v1.27.0 |
+| ClamAV | `winget install Cisco.ClamAV` | any recent 1.x |
+| Tesseract OCR | `winget install UB-Mannheim.TesseractOCR` | any |
+| Keycloak | download `keycloak-26.2.5.zip` from [releases](https://github.com/keycloak/keycloak/releases), extract | 26.2.5 |
+
+Put downloaded/extracted binaries under a `native/` folder at the repo root
+(already gitignored). Postgres and Redis typically already run as Windows
+services once installed.
+
+### 2. Configure each service
+
+- **Postgres**: create the `neurox` database and a `neurox_migration`
+  superuser role (matching what the Docker image's `POSTGRES_USER` bootstrap
+  does), then run the role/grant SQL from
+  [`infra/postgres/001-roles.sh`](./infra/postgres/001-roles.sh) against it,
+  substituting the `NEUROX_*_DB_PASSWORD` values from `.env`.
+- **RabbitMQ**: enable the management plugin, then create the `neurox` vhost
+  and `neurox` user with `RABBITMQ_PASSWORD` from `.env`, granting it full
+  permissions on that vhost.
+- **MinIO**: start `minio.exe server <data-dir> --console-address :9001` with
+  `MINIO_ROOT_USER`/`MINIO_ROOT_PASSWORD` from `.env`, then use `mc.exe` to
+  replicate what `minio-init` does in Compose — create the
+  `neurox-quarantine`/`neurox-documents` buckets, set them private, and create
+  the app user/policy from
+  [`infra/minio/neurox-policy.json`](./infra/minio/neurox-policy.json).
+- **ClamAV**: point `clamd.conf`/`freshclam.conf` at a writable data
+  directory, set `TCPSocket 3310` / `TCPAddr 127.0.0.1`, run `freshclam.exe`
+  once to fetch definitions, then start `clamd.exe`.
+- **OPA**: `opa.exe run --server --addr=0.0.0.0:8181 policies/`.
+- **Keycloak**: copy
+  [`infra/keycloak/neurox-realm.json`](./infra/keycloak/neurox-realm.json)
+  into `<keycloak>/data/import/`, then run
+  `bin\kc.bat start-dev --import-realm --http-port=8080` with
+  `KC_BOOTSTRAP_ADMIN_USERNAME`/`KC_BOOTSTRAP_ADMIN_PASSWORD` from `.env`. For
+  full role-based testing, use `kcadm.bat` to replicate
+  [`infra/keycloak/bootstrap-acceptance.sh`](./infra/keycloak/bootstrap-acceptance.sh)
+  (creates the 7 synthetic users and the `neurox-e2e` client) against
+  `http://localhost:8080`.
+
+### 3. Python services
+
+All Python processes (`api` + every `*-worker`, plus `mock-erp`) can share one
+venv, since `requirements-document.txt`/`requirements-retrieval.txt` don't
+conflict with the base `requirements.txt`:
+
+```powershell
+py -3.12 -m venv services/api/.venv
+services/api/.venv/Scripts/pip install -r services/api/requirements.txt -r services/api/requirements-document.txt -r services/api/requirements-retrieval.txt --extra-index-url https://download.pytorch.org/whl/cpu
+```
+
+`services/api/app/config.py` already defaults every host to `localhost` — add
+only these overrides to root `.env` (constructing full connection strings
+from the individual `.env` passwords, since Compose normally does that
+interpolation):
+
+```dotenv
+DATABASE_URL=postgresql+asyncpg://neurox_app:<NEUROX_APP_DB_PASSWORD>@localhost:5432/neurox
+WORKER_DATABASE_URL=postgresql+asyncpg://neurox_worker:<NEUROX_WORKER_DB_PASSWORD>@localhost:5432/neurox
+RABBITMQ_URL=amqp://neurox:<RABBITMQ_PASSWORD>@localhost:5672/neurox
+RETRIEVAL_URL=http://localhost:8100
+OPA_URL=http://localhost:8181
+MOCK_ERP_URL=http://localhost:8090
+STORAGE_BACKEND=s3
+S3_ACCESS_KEY=<MINIO_APP_USER>
+S3_SECRET_KEY=<MINIO_APP_PASSWORD>
+```
+
+Then run migrations and seed once, against the `neurox_migration` /
+`neurox_app` roles respectively:
+
+```powershell
+cd services/api
+$env:DATABASE_URL = "postgresql+asyncpg://neurox_migration:<NEUROX_MIGRATION_DB_PASSWORD>@localhost:5432/neurox"
+.venv/Scripts/python.exe -m alembic upgrade head
+$env:DATABASE_URL = "postgresql+asyncpg://neurox_app:<NEUROX_APP_DB_PASSWORD>@localhost:5432/neurox"
+.venv/Scripts/python.exe -m scripts.seed
+```
+
+### 4. Web app
+
+Create `apps/web/.env.local` (gitignored, standard Next.js dev convention):
+
+```dotenv
+NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
+NEXT_PUBLIC_AUTH_MODE=keycloak
+NEXT_PUBLIC_KEYCLOAK_URL=http://localhost:8080
+NEXT_PUBLIC_KEYCLOAK_REALM=neurox
+NEXT_PUBLIC_KEYCLOAK_CLIENT_ID=neurox-web
+```
+
+Then `npm ci` and `npm run dev` from `apps/web/`.
+
+### 5. Start everything
+
+```powershell
+pwsh scripts/run-native.ps1 start
+pwsh scripts/run-native.ps1 status
+pwsh scripts/run-native.ps1 stop
+```
+
+This starts every native binary and Python worker (Postgres/Redis are left
+alone since they run as persistent Windows services). It does not start the
+web dev server; run that separately.
+
+### Known caveat: RabbitMQ
+
+RabbitMQ's native Windows boot can hang indefinitely right after printing its
+version banner, before any of its own boot-step logging — reproduced across
+both RabbitMQ 4.1.0 and 3.13.7, and both Erlang 27 and 29. Diagnosis via
+`rabbitmqctl eval` traced it to `rabbit:start_it/1` blocked forever waiting on
+a reply from an `application_controller` that is itself completely idle —
+consistent with a call silently orphaned by an interrupted boot step, most
+likely real-time antivirus scanning interfering with the many small files
+RabbitMQ's Khepri/Mnesia store writes on first start. Adding a Windows
+Defender exclusion for `native/` and the RabbitMQ install directory (requires
+an administrator) is the most likely fix; this has not yet been verified on
+this machine. Until resolved, document-processing queues, agent workers, and
+the outbox relay won't run — the API, auth, storage, malware scanning,
+retrieval, and policy checks all work independently of RabbitMQ.
 
 ### Optional operations profile
 
@@ -158,3 +298,8 @@ See [CURRENT_STATUS.md](./CURRENT_STATUS.md) for evidence-backed state and [MAST
 - [Technical architecture and agent explainer](./docs/competition/TECHNICAL_ARCHITECTURE_AND_AGENT_EXPLAINER.md)
 - [Demo and buyer pitch guide](./docs/competition/DEMO_AND_BUYER_PITCH_GUIDE.md)
 - [Judges Q&A and gap register](./docs/competition/JUDGES_QA_AND_GAP_REGISTER.md)
+
+
+Username: admin (or requester, analyst, procurement, compliance, finance, auditor)
+
+Password: d3bbc9db8663f9282502400c6c2010f116335857e0a0b5c53a0dd018b0687c91

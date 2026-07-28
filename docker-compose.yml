@@ -148,7 +148,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 20
-    networks: [data]
+    networks: [app, data]
 
   minio-init:
     image: minio/mc:RELEASE.2025-04-16T18-13-26Z

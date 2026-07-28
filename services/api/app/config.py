@@ -63,6 +63,7 @@ class Settings(BaseSettings):
     OCR_FALLBACK: str = "easyocr"
     OCR_MIN_NATIVE_CHARACTERS: int = 40
     OCR_MIN_CONFIDENCE: float = 0.60
+    EASYOCR_MODEL_DIR: str = "/opt/easyocr"
 
     GEMINI_API_KEY: str = ""
     DEFAULT_MODEL: str = "gemini-3.6-flash"

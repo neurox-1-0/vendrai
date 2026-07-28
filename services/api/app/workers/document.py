@@ -240,7 +240,7 @@ def extract_image(path: Path) -> tuple[list[tuple[int, str, dict]], str]:
         return [(1, " ".join(words), {"parser": "tesseract", "confidence": average, "items": items})], "tesseract"
     try:
         import easyocr
-        results = easyocr.Reader(["en"], gpu=False, model_storage_directory="/opt/easyocr", download_enabled=False).readtext(str(path))
+        results = easyocr.Reader(["en"], gpu=False, model_storage_directory=settings.EASYOCR_MODEL_DIR, download_enabled=True).readtext(str(path))
     except Exception as exc:
         raise RuntimeError("LOW_CONFIDENCE_OCR_NO_FALLBACK_MODEL") from exc
     fallback_items = [{"type": "line", "bbox": bbox, "text": text, "confidence": confidence} for bbox, text, confidence in results]
