@@ -59,6 +59,14 @@ Do not add unrelated enterprise infrastructure before these gates are complete.
 - [x] Add correlated OpenTelemetry, Tempo/Prometheus/Grafana configuration and source redaction.
 - [x] Add pgBackRest/WAL object-storage backup configuration and restore runbook.
 - [x] Add a reproducible 100-case synthetic evaluation manifest.
+- [x] Add tenant-scoped active/shadow risk findings for duplicate vendor,
+  duplicate invoice, bank change, price, quantity and extraction confidence.
+- [x] Add server-derived STP, invoice/onboarding cycle, activation, exception
+  and approval-aging metrics with governed natural-language metric queries.
+- [x] Add configurable, deduplicated operational alerts and a 15-minute
+  evaluator that reuses durable notification delivery.
+- [x] Replace the browser-only analytics calculations with API-derived KPI,
+  trend, exception, risk and alert views.
 - [x] Add CI gates for lint, typing, tests, migrations, live RLS/checkpoints,
   contracts, dependency audits, SBOM, image scan and secret scan.
 - [x] Freeze historical Alembic revisions, add a mutable-metadata regression
@@ -66,12 +74,6 @@ Do not add unrelated enterprise infrastructure before these gates are complete.
 
 ## P0 — acceptance blockers before PR to `dev`
 
-- [ ] Owner: free enough workstation space for the complete
-  OCR/model/security product build. Current free space fell to approximately
-  3.5 GB during CI image reproduction, with no complete NeuroX OCR/retrieval
-  image cached. Allow 25–35 GB for the
-  product build; 45–50 GB remains the safe target for operations and repeated
-  evaluation runs.
 - [x] Add a local environment bootstrap that preserves the Gemini key,
   generates internal service/database/Keycloak/MinIO/Grafana secrets and never
   commits `.env`.
@@ -91,6 +93,12 @@ Do not add unrelated enterprise infrastructure before these gates are complete.
 - [ ] Configure an approved official EU sanctions export and run live OFAC/UN/EU refresh.
 - [ ] Publish the two synthetic policy PDFs and run live Qdrant tenant/ACL/date tests.
 - [ ] Materialize and execute 50 supplier plus 50 invoice cases through real services.
+- [ ] Run the synthetic shadow-model trainer in the product stack, verify the
+  checksummed private `skops` artifact and record its evaluation result.
+- [ ] Execute the analytics dashboard and governed-query browser journeys with
+  analyst, finance, auditor and requester-only roles.
+- [ ] Run the alert evaluator twice per rule and prove deduplication,
+  acknowledgement, SMTP isolation and tenant scoping against PostgreSQL.
 - [ ] Enforce extraction F1, duplicate recall, exact identifier, Recall@10,
   citation precision, tenant isolation, ERP authorization and PII leakage thresholds.
 - [ ] Run Playwright journeys VO-001–VO-005 and AP-001–AP-007 with accessibility checks.
@@ -128,6 +136,8 @@ Do not add unrelated enterprise infrastructure before these gates are complete.
 
 ## Later work
 
+- [ ] Add the approved cloud OCR provider adapter, tenant-scoped routing policy,
+  circuit breaker, cost controls and local/cloud fallback acceptance matrix.
 - [ ] Correctly provision optional Langfuse v3 with ClickHouse, Valkey and blob storage.
 - [ ] Add Slack/Teams adapters without coupling them to case transitions.
 - [ ] Add Kubernetes manifests after Compose acceptance is proven.

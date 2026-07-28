@@ -29,7 +29,7 @@ Docker cleanup was performed.
 
 | Capability | Status | Evidence / remaining gate |
 |---|---|---|
-| Reversible Alembic schema and full SQLAlchemy model | VERIFIED | Fresh PostgreSQL upgrade, downgrade to base and re-upgrade through copilot head `a1778899aabb` passed. Historical revisions now contain frozen Alembic operations and a regression test rejects mutable ORM `create_all`/`drop_all` calls. |
+| Reversible Alembic schema and full SQLAlchemy model | IMPLEMENTED | The previously verified PostgreSQL chain through `a1778899aabb` remains frozen. Fraud/analytics revision `b28899aabbcc` is the single static head and passes ORM/API migration-history tests; its fresh PostgreSQL upgrade/downgrade/re-upgrade is still required. |
 | API, worker, relay, audit and migration database roles | VERIFIED | Live two-tenant tests prove cross-role grants and RLS isolation. |
 | Transaction-local tenant context | VERIFIED | Live non-superuser API/worker/audit/relay test passed; LangGraph checkpoint tables also use tenant-prefixed RLS. |
 | Keycloak OIDC, PKCE, RBAC and synthetic user bootstrap | IMPLEMENTED | Acceptance realm/client/bootstrap exist; live token, role and tenant tests require the full stack. |
@@ -41,11 +41,15 @@ Docker cleanup was performed.
 | S3/MinIO quarantine and private document storage | IMPLEMENTED | Presigned upload, completion validation, duplicate hashes and private download exist; live MinIO expiry/isolation tests remain. |
 | ClamAV document gate | IMPLEMENTED | Quarantine scan/move and failure states exist; malicious PDF/archive-bomb acceptance remains. |
 | Native PDF plus per-page Docling/Tesseract/EasyOCR | VERIFIED | Mixed native/scanned routing and low-confidence fallback unit tests pass; corpus-level F1 is not measured. |
+| Evidence-grade extraction candidates | VERIFIED | Extracted fields now persist page, bounding box, engine/version, confidence grade and validation results; low-confidence critical tax/bank identifiers create review findings. Unit tests cover OCR confidence and locator propagation; corpus F1 remains a release gate. |
 | Local PII recognition, tokenization, encryption and blind indexes | VERIFIED | Tax/bank/SWIFT/registration recognizers and adversarial payload rejection tests pass; full log/trace fixture sweep remains. |
 | Parent/child policy ingestion | VERIFIED | Structure-aware chunking tests pass. |
 | Dense+sparse Qdrant retrieval, RRF and reranking | IMPLEMENTED | Tenant/ACL/effective-date filtering exists; live Qdrant and Recall@10/citation metrics remain. |
 | OFAC/UN/EU versioned sanctions adapters | IMPLEMENTED | Official-shape parsers, SSRF/DOCTYPE defenses, checksums, ETags and stale/missing-source blocking exist. Live OFAC and UN downloads parsed successfully; an approved EU export URL is still required. |
 | Deterministic duplicate/sanctions/PO/GRN/policy controls | VERIFIED | Unit tests cover duplicate scoring, sanctions fail-closed behavior and invoice matching; 100-case calibration remains. |
+| Fraud findings and shadow anomaly scoring | IMPLEMENTED | Duplicate vendor/invoice and bank-change controls persist active, explainable findings; robust price/quantity features and an optional tenant Isolation Forest persist shadow-only findings. A reproducible synthetic trainer stores checksummed `skops` artifacts and registers evaluation-required model versions. Production history, retrospective evaluation and eight-week shadow acceptance remain. |
+| Event-derived AP and onboarding analytics | VERIFIED | Server-side KPI formulas, aging buckets, exception breakdown, governed metric queries and requester denial pass API/unit tests. The frontend renders KPI definitions, prior-period comparisons, STP trends, exceptions and drill-downs; live browser acceptance remains. |
+| Configurable operational alerts | IMPLEMENTED | Tenant-scoped rules and deduplicated alert instances support SLA, bank, duplicate and extraction findings; a 15-minute worker reuses durable in-app/SMTP notification delivery. API tests prove deduplication and tenant isolation; outage and multi-instance acceptance remain. |
 | Fail-closed OPA ERP authorization | IMPLEMENTED | ERP writes require an independent decision over state, evidence hash, case version, SoD, verification and mandatory reviews. Typed gateway tests pass; the pinned OPA image compile/runtime test is blocked by Docker registry CDN DNS. |
 | Supplier and invoice durable agent execution | VERIFIED | A validated Gemini plan selects eligible supplier/invoice capabilities; independent specialists execute concurrently with failure isolation and persisted timing. The shared PostgreSQL-checkpointed LangGraph owns contradiction reasoning, verification, clarification/review/approval and ERP interrupts. Live checkpoint disconnect/reconnect passed; full worker-kill journey remains. |
 | Planner and capability registry | VERIFIED | Tests prove schema-valid real-gateway planning, mandatory capability enforcement, unknown/missing dependency rejection and dynamic execution groups. Provider failure remains visible and preserves mandatory deterministic work. |
@@ -70,13 +74,18 @@ Docker cleanup was performed.
 
 ## Latest local verification
 
-- API/domain/contract tests: `78 passed, 2 skipped`; the skips are the separately
+- API/domain/contract tests: `82 passed, 2 skipped`; the skips are the separately
   executed live PostgreSQL integration tests.
 - Live PostgreSQL RLS/checkpoint integration: `2 passed`.
-- Alembic PostgreSQL 16 downgrade-to-base and re-upgrade-to-head: passed.
+- Alembic PostgreSQL 16 downgrade-to-base and re-upgrade through
+  `a1778899aabb`: passed previously; new head `b28899aabbcc` still requires the
+  same live PostgreSQL drill.
 - Ruff, mypy domain gate and Python compilation: passed.
 - OpenAPI export and Orval client regeneration: passed.
 - Frontend ESLint, TypeScript and Next.js 16.2.11 production build: passed.
+- Fraud/analytics additions: Ruff and targeted mypy passed; API tests cover
+  event-derived formulas, governed-query authorization, risk disposition,
+  alert deduplication, tenant isolation and the synthetic shadow-model path.
 - Generated contracts include run steps/graph/diagnostics and copilot
   sessions/messages/feedback/semantic assistance targets with mutation
   idempotency enforcement.
