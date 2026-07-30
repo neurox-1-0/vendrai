@@ -9,38 +9,56 @@ usage() {
 Usage: ./scripts/stack.sh <command>
 
 Commands:
+  preflight        Check host preconditions without starting anything.
   product-up       Start the complete product workflow runtime.
   product-down     Stop the product runtime without deleting volumes.
   operations-up    Start product runtime plus telemetry and WAL backup.
   operations-down  Stop the operations runtime without deleting volumes.
+  bootstrap        Load reference data, policies, and sanctions (idempotent).
+  doctor           Report liveness, readiness, and business-readiness.
   status           Show current NeuroX containers.
+
+Options:
+  --skip-preflight  Start without checking host preconditions. Only useful
+                    when a check is wrong; fix the check instead.
+
+Bootstrap options are passed through, e.g.
+  ./scripts/stack.sh bootstrap --allow-missing-eu-sanctions
 EOF
 }
 
-warn_low_disk() {
-  available_kb="$(df -Pk "${project_root}" | awk 'NR == 2 { print $4 }')"
-  if (( available_kb < 15728640 )); then
-    available_gb=$(( available_kb / 1048576 ))
-    printf 'Warning: only about %s GB is free. The OCR/retrieval build may exhaust disk space.\n' "${available_gb}" >&2
-    printf 'No Docker data will be deleted automatically.\n' >&2
+run_preflight() {
+  if [[ "${1:-}" == "--skip-preflight" ]]; then
+    printf 'Skipping preflight checks.\n' >&2
+    return 0
   fi
+  "${project_root}/scripts/preflight.sh"
 }
 
-case "${1:-}" in
+command_name="${1:-}"
+shift || true
+
+case "${command_name}" in
+  preflight)
+    exec "${project_root}/scripts/preflight.sh" "$@"
+    ;;
   product-up)
-    warn_low_disk
+    run_preflight "${1:-}"
     docker compose --profile acceptance up --build --detach
+    printf '\nStack started. Check it with: ./scripts/stack.sh doctor\n'
     ;;
   product-down)
-    docker compose down
+    docker compose --profile acceptance down
     ;;
   operations-up)
+    run_preflight "${1:-}"
     docker compose \
       -f docker-compose.yml \
       -f docker-compose.operations.yml \
       --profile acceptance \
       --profile operations \
       up --build --detach
+    printf '\nStack started. Check it with: ./scripts/stack.sh doctor\n'
     ;;
   operations-down)
     docker compose \
@@ -49,8 +67,14 @@ case "${1:-}" in
       --profile operations \
       down
     ;;
+  bootstrap)
+    docker compose --profile acceptance exec -T api python -m scripts.bootstrap "$@"
+    ;;
+  doctor)
+    exec "${project_root}/scripts/doctor.sh" "$@"
+    ;;
   status)
-    docker compose ps
+    docker compose --profile acceptance ps
     ;;
   *)
     usage >&2
