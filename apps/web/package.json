@@ -9,12 +9,14 @@
     "lint": "eslint",
     "openapi:export": "cd ../../services/api && .venv/bin/python -m scripts.export_openapi",
     "api:generate": "orval --config orval.config.ts",
-    "api:check": "npm run openapi:export && npm run api:generate && git diff --exit-code -- ../../packages/contracts/openapi.json src/generated"
+    "api:check": "npm run openapi:export && npm run api:generate && git diff --exit-code -- ../../packages/contracts/openapi.json src/generated",
+    "e2e": "playwright test --project=setup --project=journeys",
+    "e2e:failures": "playwright test --project=failure-injection",
+    "e2e:install": "playwright install --with-deps chromium"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.101.2",
     "framer-motion": "^12.42.2",
-    "keycloak-js": "^26.2.4",
     "lucide-react": "^1.24.0",
     "next": "^16.2.11",
     "react": "19.2.4",
@@ -22,6 +24,7 @@
     "recharts": "^3.9.2"
   },
   "devDependencies": {
+    "@playwright/test": "1.56.1",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
