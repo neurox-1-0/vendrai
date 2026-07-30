@@ -1,0 +1,8 @@
+# Document mutation for the 100-case evaluation materializer.
+#
+# Kept out of requirements.txt on purpose: these are only needed to build the
+# mutated evaluation documents, and neither the API image nor any worker
+# should carry a PDF rasteriser it never calls.
+-r requirements.txt
+pymupdf==1.27.2
+pillow==12.0.0
