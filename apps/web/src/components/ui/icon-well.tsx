@@ -8,7 +8,7 @@ const IconWell = React.forwardRef<HTMLDivElement, IconWellProps>(
   ({ className, children, ...props }, ref) => (
     <div
       ref={ref}
-      className={`flex items-center justify-center rounded-2xl bg-[var(--color-clay)] shadow-[var(--shadow-inset-deep)] h-14 w-14 text-[var(--color-accent)] ${className}`}
+      className={`flex items-center justify-center rounded-2xl bg-[var(--color-accent-light)] h-14 w-14 text-[var(--color-accent)] ${className ?? ""}`}
       {...props}
     >
       {children}
