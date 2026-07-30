@@ -24,6 +24,7 @@ import { useAuth } from "@/app/providers";
 import { api, type AgentStep } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { JsonViewer } from "@/components/ui/json-viewer";
 import { useAssistanceTarget } from "@/components/assistance-registry";
 
 const KIND_LABELS: Record<AgentStep["agent_kind"], string> = {
@@ -45,15 +46,15 @@ const KIND_ICONS = {
 };
 
 const STATUS_STYLE: Record<string, string> = {
-  SUCCESS: "border-emerald-300 bg-emerald-50 text-emerald-950",
-  COMPLETED: "border-emerald-300 bg-emerald-50 text-emerald-950",
-  RUNNING: "border-violet-300 bg-violet-50 text-violet-950",
-  QUEUED: "border-slate-300 bg-slate-50 text-slate-800",
-  PARTIAL: "border-amber-300 bg-amber-50 text-amber-950",
-  RETRYING: "border-amber-300 bg-amber-50 text-amber-950",
-  INTERRUPTED: "border-blue-300 bg-blue-50 text-blue-950",
-  BLOCKED: "border-red-300 bg-red-50 text-red-950",
-  FAILED: "border-red-300 bg-red-50 text-red-950",
+  SUCCESS: "border-emerald-200 bg-emerald-50 text-emerald-900",
+  COMPLETED: "border-emerald-200 bg-emerald-50 text-emerald-900",
+  RUNNING: "border-blue-200 bg-blue-50 text-blue-900",
+  QUEUED: "border-[var(--color-border)] bg-[var(--color-surface-muted)] text-[var(--color-ink)]",
+  PARTIAL: "border-amber-200 bg-amber-50 text-amber-900",
+  RETRYING: "border-amber-200 bg-amber-50 text-amber-900",
+  INTERRUPTED: "border-blue-200 bg-blue-50 text-blue-900",
+  BLOCKED: "border-rose-200 bg-rose-50 text-rose-900",
+  FAILED: "border-rose-200 bg-rose-50 text-rose-900",
 };
 
 function formatDuration(value: number | null): string {
@@ -61,6 +62,21 @@ function formatDuration(value: number | null): string {
   if (value < 1_000) return `${value} ms`;
   if (value < 60_000) return `${(value / 1_000).toFixed(value < 10_000 ? 1 : 0)} s`;
   return `${Math.floor(value / 60_000)}m ${Math.round((value % 60_000) / 1_000)}s`;
+}
+
+/**
+ * Describe a step's timing without ever presenting a projection as a
+ * measurement. A step still in flight has no measured latency to report, so it
+ * says so rather than showing a number from the live-progress cache dressed in
+ * the same styling as a committed one.
+ */
+function timingLabel(step: AgentStep): string {
+  if (step.timing_source === "PROJECTED") {
+    return step.latency_ms === null
+      ? "in progress, not yet measured"
+      : `${formatDuration(step.latency_ms)} elapsed so far (not yet measured)`;
+  }
+  return `${formatDuration(step.latency_ms)} measured`;
 }
 
 function StepStatusIcon({ status }: { status: string }) {
@@ -77,8 +93,21 @@ function StepStatusIcon({ status }: { status: string }) {
 function StepCard({ step }: { step: AgentStep }) {
   const [expanded, setExpanded] = useState(false);
   const style = STATUS_STYLE[step.status] ?? STATUS_STYLE.QUEUED;
+  const projected = step.timing_source === "PROJECTED";
   return (
-    <article className={`rounded-2xl border p-4 ${style}`}>
+    <article
+      className={`rounded-2xl p-4 ${style} ${
+        // A dashed edge distinguishes a projection at a glance, and the
+        // accessible label carries the same information for anyone who cannot
+        // see the border.
+        projected ? "border border-dashed opacity-90" : "border"
+      }`}
+      aria-label={
+        projected
+          ? `${step.display_name}, in progress, timing not yet measured`
+          : undefined
+      }
+    >
       <button
         type="button"
         className="flex w-full items-start justify-between gap-3 text-left"
@@ -90,14 +119,14 @@ function StepCard({ step }: { step: AgentStep }) {
           <span className="min-w-0">
             <span className="flex items-center gap-2">
               <span className="block truncate font-bold">{step.display_name}</span>
-              {step.input_summary.projection === "LIVE" && (
-                <span className="rounded-full border border-current/25 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider">
-                  Live
+              {projected && (
+                <span className="rounded-full border border-dashed border-current/40 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider">
+                  In progress
                 </span>
               )}
             </span>
             <span className="mt-1 block text-xs opacity-75">
-              {step.status.replaceAll("_", " ")} · attempt {step.attempt} · {formatDuration(step.latency_ms)}
+              {step.status.replaceAll("_", " ")} · attempt {step.attempt} · {timingLabel(step)}
             </span>
           </span>
         </span>
@@ -118,12 +147,9 @@ function StepCard({ step }: { step: AgentStep }) {
               {String(step.error.error_code ?? "Structured error recorded")}
             </p>
           )}
-          <details className="mt-3">
-            <summary className="cursor-pointer font-bold">Structured output</summary>
-            <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap rounded-xl bg-slate-950 p-3 text-xs text-slate-100">
-              {JSON.stringify(step.output_summary, null, 2)}
-            </pre>
-          </details>
+          <div className="mt-3">
+            <JsonViewer data={step.output_summary} title="Structured output" collapsed className="max-h-64" />
+          </div>
         </div>
       )}
     </article>
@@ -162,14 +188,14 @@ export function AgentExecutionMap({ runId }: { runId: string }) {
   if (graph.isLoading) {
     return (
       <Card {...assistance} aria-live="polite">
-        <div className="h-40 animate-pulse rounded-2xl bg-slate-200" />
+        <div className="h-40 animate-pulse rounded-xl bg-[var(--color-surface-muted)]" />
       </Card>
     );
   }
   if (graph.isError || !graph.data) {
     return (
       <Card {...assistance}>
-        <p role="alert" className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-900">
+        <p role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-900">
           Execution data is temporarily unavailable: {graph.error?.message}
         </p>
       </Card>
@@ -182,7 +208,7 @@ export function AgentExecutionMap({ runId }: { runId: string }) {
       <Card {...assistance} className="overflow-hidden">
         <header className="flex flex-col justify-between gap-5 lg:flex-row lg:items-start">
           <div>
-            <p className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-violet-700">
+            <p className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-[var(--color-accent)]">
               <Activity className="h-4 w-4" aria-hidden="true" />
               Live agent execution
             </p>
@@ -206,15 +232,24 @@ export function AgentExecutionMap({ runId }: { runId: string }) {
             ["Critical path", data.timing.critical_path_ms],
             ["Parallel time saved", data.timing.parallel_time_saved_ms],
           ].map(([label, value]) => (
-            <div key={String(label)} className="rounded-2xl bg-white/50 p-4 shadow-[var(--shadow-inset-sm)]">
+            <div key={String(label)} className="rounded-xl bg-[var(--color-surface-muted)] p-4">
               <dt className="text-xs font-bold uppercase tracking-wider text-[var(--color-muted)]">{label}</dt>
               <dd className="mt-2 flex items-center gap-2 text-xl font-bold">
-                <Clock3 className="h-4 w-4 text-violet-600" aria-hidden="true" />
+                <Clock3 className="h-4 w-4 text-[var(--color-accent)]" aria-hidden="true" />
                 {formatDuration(value as number | null)}
               </dd>
             </div>
           ))}
         </dl>
+        {data.timing.projected_step_count > 0 && (
+          <p className="mt-3 text-xs text-[var(--color-muted)]">
+            Measured from {data.nodes.length - data.timing.projected_step_count} completed step
+            {data.nodes.length - data.timing.projected_step_count === 1 ? "" : "s"}.{" "}
+            {data.timing.projected_step_count} step
+            {data.timing.projected_step_count === 1 ? " is" : "s are"} still running and
+            not counted here.
+          </p>
+        )}
 
         {lanes.length > 0 ? (
           <div className="mt-8 space-y-5">
@@ -223,7 +258,7 @@ export function AgentExecutionMap({ runId }: { runId: string }) {
               return (
                 <section key={kind} aria-labelledby={`agent-lane-${kind}`}>
                   <div className="mb-3 flex items-center gap-2">
-                    <LaneIcon className="h-5 w-5 text-violet-700" aria-hidden="true" />
+                    <LaneIcon className="h-5 w-5 text-[var(--color-accent-dark)]" aria-hidden="true" />
                     <h3 id={`agent-lane-${kind}`} className="text-sm font-bold uppercase tracking-wider">
                       {KIND_LABELS[kind]}
                     </h3>
@@ -237,8 +272,8 @@ export function AgentExecutionMap({ runId }: { runId: string }) {
             })}
           </div>
         ) : (
-          <div className="mt-8 rounded-2xl border border-dashed border-slate-300 p-8 text-center">
-            <CircleDashed className="mx-auto h-8 w-8 text-violet-600" aria-hidden="true" />
+          <div className="mt-8 rounded-xl border border-dashed border-[var(--color-border-strong)] p-8 text-center">
+            <CircleDashed className="mx-auto h-8 w-8 text-[var(--color-accent)]" aria-hidden="true" />
             <p className="mt-3 font-bold">The run is waiting for its first persisted agent step.</p>
             <p className="mt-1 text-sm text-[var(--color-muted)]">Document processing and queue events remain visible below.</p>
           </div>
@@ -246,16 +281,16 @@ export function AgentExecutionMap({ runId }: { runId: string }) {
       </Card>
 
       {diagnosticsOpen && (
-        <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/55" role="presentation">
+        <div className="fixed inset-0 z-50 flex justify-end bg-black/55" role="presentation">
           <section
             role="dialog"
             aria-modal="true"
             aria-labelledby="run-diagnostics-title"
-            className="h-full w-full max-w-2xl overflow-y-auto bg-slate-950 p-6 text-slate-100 shadow-2xl lg:p-8"
+            className="h-full w-full max-w-2xl overflow-y-auto bg-[var(--color-ink)] p-6 text-slate-100 shadow-[var(--shadow-lg)] lg:p-8"
           >
             <header className="flex items-start justify-between gap-4">
               <div>
-                <p className="text-xs font-bold uppercase tracking-[0.18em] text-cyan-300">Judge-safe diagnostics</p>
+                <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">Judge-safe diagnostics</p>
                 <h2 id="run-diagnostics-title" className="mt-2 text-2xl font-bold">Run inspection</h2>
                 <p className="mt-2 text-sm text-slate-300">Sanitized versions, integrity controls, route, and tool outputs. No secrets, PII, or private reasoning.</p>
               </div>
@@ -264,20 +299,20 @@ export function AgentExecutionMap({ runId }: { runId: string }) {
               </Button>
             </header>
             {diagnostics.isLoading && <p className="mt-8" aria-live="polite">Loading sanitized diagnostics…</p>}
-            {diagnostics.isError && <p className="mt-8 text-red-300" role="alert">{diagnostics.error.message}</p>}
+            {diagnostics.isError && <p className="mt-8 text-rose-300" role="alert">{diagnostics.error.message}</p>}
             {diagnostics.data && (
               <div className="mt-8 space-y-6">
                 <section>
-                  <h3 className="font-bold text-cyan-300">Versions</h3>
-                  <pre className="mt-2 overflow-auto rounded-2xl bg-white/5 p-4 text-xs">{JSON.stringify(diagnostics.data.versions, null, 2)}</pre>
+                  <h3 className="font-bold text-blue-300">Versions</h3>
+                  <pre className="mt-2 overflow-auto rounded-xl bg-white/5 p-4 text-xs">{JSON.stringify(diagnostics.data.versions, null, 2)}</pre>
                 </section>
                 <section>
-                  <h3 className="font-bold text-cyan-300">Integrity</h3>
-                  <pre className="mt-2 overflow-auto rounded-2xl bg-white/5 p-4 text-xs">{JSON.stringify(diagnostics.data.integrity, null, 2)}</pre>
+                  <h3 className="font-bold text-blue-300">Integrity</h3>
+                  <pre className="mt-2 overflow-auto rounded-xl bg-white/5 p-4 text-xs">{JSON.stringify(diagnostics.data.integrity, null, 2)}</pre>
                 </section>
                 <section>
-                  <h3 className="font-bold text-cyan-300">Decision summary</h3>
-                  <pre className="mt-2 overflow-auto rounded-2xl bg-white/5 p-4 text-xs">{JSON.stringify(diagnostics.data.decision_summary, null, 2)}</pre>
+                  <h3 className="font-bold text-blue-300">Decision summary</h3>
+                  <pre className="mt-2 overflow-auto rounded-xl bg-white/5 p-4 text-xs">{JSON.stringify(diagnostics.data.decision_summary, null, 2)}</pre>
                 </section>
               </div>
             )}

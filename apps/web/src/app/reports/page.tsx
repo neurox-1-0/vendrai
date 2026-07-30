@@ -27,8 +27,8 @@ export default function ReportsPage() {
   };
   return (
     <div className="min-h-full p-6 lg:p-12">
-      <header className="mb-10"><p className="mb-2 text-sm font-bold uppercase tracking-[0.2em] text-[var(--color-accent)]">Controlled export</p><h1 className="font-display text-3xl font-bold">Operational reports</h1><p className="mt-2 text-[var(--color-muted)]">Exports contain only the case summary fields currently authorized in this view.</p></header>
-      {cases.isError && <p role="alert" className="mb-6 rounded-xl bg-red-50 p-4 text-red-900">Unable to prepare reports: {cases.error.message}</p>}
+      <header className="mb-10"><p className="mb-1 text-sm font-bold text-[var(--color-accent)]">Controlled export</p><h1 className="font-display text-3xl font-bold">Operational reports</h1><p className="mt-2 text-[var(--color-muted)]">Exports contain only the case summary fields currently authorized in this view.</p></header>
+      {cases.isError && <p role="alert" className="mb-6 rounded-xl border border-rose-200 bg-rose-50 p-4 text-rose-900">Unable to prepare reports: {cases.error.message}</p>}
       <div className="grid max-w-4xl gap-8 md:grid-cols-2">
         <Card>
           <Sheet className="mb-5 h-8 w-8 text-emerald-700" />

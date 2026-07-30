@@ -28,6 +28,7 @@ import { api, type MetricKey, type MetricValue } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
 
 const metricIcons: Record<MetricKey, typeof Gauge> = {
   invoice_stp_rate: Gauge,
@@ -114,7 +115,7 @@ export default function AnalyticsPage() {
     <div className="min-h-full p-6 lg:p-12">
       <header className="mb-10 flex flex-col justify-between gap-5 xl:flex-row xl:items-end">
         <div>
-          <p className="mb-2 text-sm font-bold uppercase tracking-[0.2em] text-[var(--color-accent)]">
+          <p className="mb-1 text-sm font-bold text-[var(--color-accent)]">
             Event-derived reporting
           </p>
           <h1 className="font-display text-3xl font-bold">
@@ -126,7 +127,7 @@ export default function AnalyticsPage() {
             review.
           </p>
         </div>
-        <div className="rounded-xl px-4 py-2 text-sm shadow-[var(--shadow-inset-sm)]">
+        <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2 text-sm shadow-[var(--shadow-xs)]">
           {summary.data
             ? `${new Date(summary.data.period_start).toLocaleDateString()} – ${new Date(summary.data.period_end).toLocaleDateString()}`
             : "Loading reporting period…"}
@@ -134,7 +135,7 @@ export default function AnalyticsPage() {
       </header>
 
       {error && (
-        <p role="alert" className="mb-6 rounded-xl bg-red-50 p-4 text-red-900">
+        <p role="alert" className="mb-6 rounded-xl border border-rose-200 bg-rose-50 p-4 text-rose-900">
           Unable to load analytics: {error.message}
         </p>
       )}
@@ -143,7 +144,7 @@ export default function AnalyticsPage() {
         {(summary.data?.metrics ?? []).map((metric) => {
           const Icon = metricIcons[metric.key];
           return (
-            <Card key={metric.key} className="p-6">
+            <Card key={metric.key}>
               <div className="mb-4 flex items-center justify-between">
                 <Icon className="h-6 w-6 text-[var(--color-accent)]" />
                 <span className="text-xs font-bold uppercase text-[var(--color-muted)]">
@@ -188,14 +189,14 @@ export default function AnalyticsPage() {
           <div className="mt-6 h-72" aria-label="Invoice STP trend chart">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={trendData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#cbd5e1" />
+                <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
                 <XAxis dataKey="period" tick={{ fontSize: 12 }} />
                 <YAxis domain={[0, 100]} unit="%" tick={{ fontSize: 12 }} />
                 <Tooltip />
                 <Line
                   type="monotone"
                   dataKey="value"
-                  stroke="#6C63FF"
+                  stroke="#2563EB"
                   strokeWidth={3}
                   connectNulls
                 />
@@ -213,7 +214,7 @@ export default function AnalyticsPage() {
           <div className="mt-6 h-72" aria-label="Exception distribution chart">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={exceptionData} layout="vertical">
-                <CartesianGrid strokeDasharray="3 3" stroke="#cbd5e1" />
+                <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
                 <XAxis type="number" allowDecimals={false} />
                 <YAxis
                   dataKey="name"
@@ -222,7 +223,7 @@ export default function AnalyticsPage() {
                   tick={{ fontSize: 10 }}
                 />
                 <Tooltip />
-                <Bar dataKey="total" fill="#6C63FF" radius={[0, 6, 6, 0]} />
+                <Bar dataKey="total" fill="#2563EB" radius={[0, 6, 6, 0]} />
                 <Bar dataKey="open" fill="#f59e0b" radius={[0, 6, 6, 0]} />
               </BarChart>
             </ResponsiveContainer>
@@ -245,24 +246,16 @@ export default function AnalyticsPage() {
             {(findings.data ?? []).slice(0, 8).map((finding) => (
               <div
                 key={finding.risk_finding_id}
-                className="rounded-xl p-4 shadow-[var(--shadow-inset-sm)]"
+                className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-4"
               >
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="font-bold">
                     {finding.finding_type.replaceAll("_", " ")}
                   </span>
-                  <span
-                    className={`rounded-full px-2 py-1 text-[10px] font-bold ${
-                      finding.mode === "SHADOW"
-                        ? "bg-violet-100 text-violet-900"
-                        : "bg-red-100 text-red-900"
-                    }`}
-                  >
+                  <Badge tone={finding.mode === "SHADOW" ? "brand" : "negative"}>
                     {finding.mode}
-                  </span>
-                  <span className="rounded-full bg-slate-200 px-2 py-1 text-[10px] font-bold">
-                    {finding.severity}
-                  </span>
+                  </Badge>
+                  <Badge tone="neutral">{finding.severity}</Badge>
                 </div>
                 <p className="mt-2 text-sm text-[var(--color-muted)]">
                   {finding.explanation.summary ?? finding.detector_key}
@@ -307,7 +300,7 @@ export default function AnalyticsPage() {
             {(alerts.data ?? []).slice(0, 8).map((alert) => (
               <div
                 key={alert.alert_instance_id}
-                className="rounded-xl p-4 shadow-[var(--shadow-inset-sm)]"
+                className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-4"
               >
                 <div className="flex items-start justify-between gap-3">
                   <div>
@@ -316,10 +309,11 @@ export default function AnalyticsPage() {
                       {alert.body}
                     </p>
                   </div>
-                  <span className="text-[10px] font-bold">{alert.severity}</span>
+                  <Badge tone="warning">{alert.severity}</Badge>
                 </div>
                 {alert.status === "OPEN" ? (
                   <Button
+                    variant="secondary"
                     className="mt-3"
                     onClick={() =>
                       acknowledge.mutate(alert.alert_instance_id)
@@ -329,9 +323,9 @@ export default function AnalyticsPage() {
                     Acknowledge
                   </Button>
                 ) : (
-                  <p className="mt-3 text-xs font-bold text-emerald-700">
-                    {alert.status}
-                  </p>
+                  <div className="mt-3">
+                    <Badge tone="positive">{alert.status}</Badge>
+                  </div>
                 )}
               </div>
             ))}
@@ -374,17 +368,17 @@ export default function AnalyticsPage() {
           </Button>
         </form>
         {ask.isError && (
-          <p role="alert" className="mt-4 text-sm text-red-800">
+          <p role="alert" className="mt-4 text-sm text-rose-800">
             This question is outside the governed metric catalogue.
           </p>
         )}
         {ask.data && (
-          <div className="mt-5 rounded-xl p-5 shadow-[var(--shadow-inset-sm)]">
+          <div className="mt-5 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-5">
             <p className="text-lg font-bold">{ask.data.answer}</p>
             <p className="mt-2 text-xs text-[var(--color-muted)]">
               {ask.data.metric.definition}
             </p>
-            <p className="mt-2 text-xs font-bold uppercase tracking-wide text-violet-700">
+            <p className="mt-2 text-xs font-bold uppercase tracking-wide text-[var(--color-accent)]">
               {ask.data.provider.replaceAll("_", " ")}
             </p>
           </div>

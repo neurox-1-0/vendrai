@@ -7,6 +7,7 @@ import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import { useAssistanceTarget } from "@/components/assistance-registry";
 
 export function CaseDocumentReview({
@@ -105,24 +106,17 @@ export function CaseDocumentReview({
       )}
       {selected && (
         <>
-          <div className="mb-5 flex flex-wrap gap-2" role="tablist" aria-label="Case documents">
-            {(documents.data ?? []).map((document) => (
-              <button
-                key={document.document_id}
-                type="button"
-                role="tab"
-                aria-selected={document.document_id === selected.document_id}
-                onClick={() => setSelectedId(document.document_id)}
-                className={`rounded-full px-4 py-2 text-sm font-bold ${
-                  document.document_id === selected.document_id
-                    ? "bg-slate-900 text-white"
-                    : "bg-slate-200 text-slate-800"
-                }`}
-              >
-                {document.original_filename}
-              </button>
-            ))}
-          </div>
+          <SegmentedControl
+            role="tablist"
+            aria-label="Case documents"
+            className="mb-5 flex-wrap"
+            items={(documents.data ?? []).map((document) => ({
+              value: document.document_id,
+              label: document.original_filename,
+            }))}
+            value={selected.document_id}
+            onChange={setSelectedId}
+          />
           <div className="grid gap-6 lg:grid-cols-2">
             <div>
               <div className="mb-3 flex items-center justify-between gap-3">
@@ -144,10 +138,10 @@ export function CaseDocumentReview({
                 <iframe
                   src={objectUrl}
                   title={`Source document ${selected.original_filename}`}
-                  className="h-[36rem] w-full rounded-2xl border border-slate-300 bg-white"
+                  className="h-[36rem] w-full rounded-xl border border-[var(--color-border)] bg-white"
                 />
               ) : (
-                <div className="grid h-64 place-items-center rounded-2xl bg-slate-100 text-sm text-slate-600">
+                <div className="grid h-64 place-items-center rounded-xl bg-[var(--color-surface-muted)] text-sm text-[var(--color-muted)]">
                   {content.isError
                     ? "Authorized content could not be loaded."
                     : "Source rendering becomes available after malware scan and parsing."}
@@ -159,7 +153,7 @@ export function CaseDocumentReview({
               {(fields.data ?? []).map((field) => (
                 <article
                   key={field.extracted_field_id}
-                  className="rounded-2xl p-4 shadow-[var(--shadow-inset-sm)]"
+                  className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-4"
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div>
@@ -207,7 +201,7 @@ export function CaseDocumentReview({
                         aria-label="Correction reason"
                       />
                       {correct.isError && (
-                        <p role="alert" className="text-sm text-red-800">
+                        <p role="alert" className="text-sm text-rose-800">
                           {correct.error.message}
                         </p>
                       )}
@@ -233,7 +227,7 @@ export function CaseDocumentReview({
                   No structured fields are available yet.
                 </p>
               )}
-              <details className="rounded-2xl border border-slate-200 p-4">
+              <details className="rounded-xl border border-[var(--color-border)] p-4">
                 <summary className="cursor-pointer font-bold">
                   Masked page text ({pages.data?.length ?? 0} pages)
                 </summary>
@@ -246,7 +240,7 @@ export function CaseDocumentReview({
                           ? "native"
                           : `${Math.round(page.ocr_confidence * 100)}%`}
                       </p>
-                      <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded-xl bg-slate-900 p-3 text-xs text-slate-100">
+                      <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-3 font-mono text-xs text-[var(--color-ink)]">
                         {page.text_content}
                       </pre>
                     </section>

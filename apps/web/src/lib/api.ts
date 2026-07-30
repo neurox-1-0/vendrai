@@ -61,6 +61,20 @@ export interface EvidenceItem {
   claim: string;
   reason_code: string;
   confidence: number | null;
+  /**
+   * Where this evidence came from. A document a party to the case uploaded is
+   * not the same evidence as a record read from the system of record, and a
+   * reviewer who cannot tell them apart cannot weigh the finding.
+   */
+  provenance:
+    | "USER_UPLOADED"
+    | "ERP_SYSTEM_OF_RECORD"
+    | "EXTERNAL_OFFICIAL_LIST"
+    | "TENANT_POLICY"
+    | "DERIVED_BY_SYSTEM";
+  provenance_label: string;
+  /** False for self-asserted evidence, which cannot corroborate itself. */
+  is_authoritative: boolean;
 }
 
 export interface EvidencePacket { items: EvidenceItem[]; evidence_hash: string | null }
@@ -79,6 +93,13 @@ export interface AgentStep {
   output_summary: Record<string, unknown>;
   error: Record<string, unknown>;
   latency_ms: number | null;
+  /**
+   * MEASURED once the worker has committed the step. PROJECTED while it is
+   * still in flight and its timing comes from the expiring live-progress
+   * cache. Rendering a projected figure like a measured one is a false claim
+   * about system behaviour, so the two must never share a presentation.
+   */
+  timing_source: "MEASURED" | "PROJECTED";
   started_at: string;
   completed_at: string | null;
 }
@@ -111,6 +132,8 @@ export interface RunGraph {
     critical_path_ms: number;
     parallel_time_saved_ms: number;
     human_waiting_ms: number | null;
+    /** Steps still in flight, excluded from every figure above. */
+    projected_step_count: number;
   };
 }
 

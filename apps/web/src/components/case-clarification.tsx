@@ -51,15 +51,12 @@ export function CaseClarification({
   );
 
   return (
-    <Card
-      {...assistance}
-      className="border border-amber-300 bg-amber-50/70"
-    >
+    <Card {...assistance} tint="warning">
       <div className="mb-5 flex items-center gap-3">
         <CircleHelp className="h-6 w-6 text-amber-800" />
         <div>
           <h2 className="font-display text-xl font-bold">Clarification required</h2>
-          <p className="text-sm text-slate-700">
+          <p className="text-sm text-amber-900/80">
             Answer only the requested fields. Sensitive answers are encrypted and masked.
           </p>
         </div>
@@ -90,7 +87,7 @@ export function CaseClarification({
         })}
       </div>
       {respond.isError && (
-        <p role="alert" className="mt-4 text-sm text-red-900">
+        <p role="alert" className="mt-4 text-sm text-rose-900">
           {respond.error.message}
         </p>
       )}

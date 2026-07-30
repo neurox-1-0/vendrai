@@ -2,12 +2,21 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { FileCheck2, Receipt, UploadCloud } from "lucide-react";
+import { Receipt } from "lucide-react";
 import { api } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
+import { Dropzone } from "@/components/ui/dropzone";
+import { ProgressSteps } from "@/components/ui/progress-steps";
 import { useAssistanceTarget } from "@/components/assistance-registry";
+
+const STEPS = [
+  "Preparing upload",
+  "Uploading invoice documents",
+  "Submitting invoice for agent analysis",
+];
 
 export default function InvoiceIntake() {
   const router = useRouter();
@@ -24,7 +33,9 @@ export default function InvoiceIntake() {
   const [priority, setPriority] = useState<"LOW" | "NORMAL" | "HIGH" | "URGENT">("NORMAL");
   const [files, setFiles] = useState<File[]>([]);
   const [busy, setBusy] = useState(false);
-  const [progress, setProgress] = useState("");
+  const [stepIndex, setStepIndex] = useState<number | null>(null);
+  const [stepDetail, setStepDetail] = useState("");
+  const [stepFailed, setStepFailed] = useState(false);
   const [error, setError] = useState("");
 
   async function submit(event: React.FormEvent) {
@@ -32,17 +43,15 @@ export default function InvoiceIntake() {
     if (!files.length) return setError("Add at least one invoice document.");
     setBusy(true);
     setError("");
+    setStepFailed(false);
     try {
-      setProgress("Preparing upload...");
-      const invoiceCase = await api.createInvoiceDraft(
-        invoiceNumber,
-        priority,
-        poNumber || undefined,
-      );
+      setStepIndex(0);
+      setStepDetail("");
+      const invoiceCase = await api.createInvoiceDraft(invoiceNumber, priority, poNumber || undefined);
 
-      const documentIds: string[] = [];
+      setStepIndex(1);
       for (const file of files) {
-        setProgress(`Uploading document: ${file.name}`);
+        setStepDetail(file.name);
         const fnLower = file.name.toLowerCase();
         const documentType = (fnLower.includes("po") || fnLower.includes("purchase")) ? "PURCHASE_ORDER"
                            : (fnLower.includes("grn") || fnLower.includes("receipt")) ? "GOODS_RECEIPT"
@@ -50,15 +59,15 @@ export default function InvoiceIntake() {
         const upload = await api.initiateUpload(invoiceCase.case_id, file, documentType);
         await api.uploadContent(upload, file);
         await api.completeUpload(upload.document_id);
-        documentIds.push(upload.document_id);
       }
 
-      setProgress("Submitting invoice for agent analysis…");
+      setStepIndex(2);
+      setStepDetail("");
       const created = await api.submitCase(invoiceCase.case_id, invoiceCase.current_version);
-
       router.push(`/cases/${created.case_id}`);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to submit this invoice");
+      setStepFailed(true);
       setBusy(false);
     }
   }
@@ -66,7 +75,7 @@ export default function InvoiceIntake() {
   return (
     <div className="min-h-full p-6 lg:p-12">
       <header className="mb-10">
-        <p className="mb-2 text-sm font-bold uppercase tracking-[0.2em] text-[var(--color-accent)]">Accounts Payable</p>
+        <p className="mb-1 text-sm font-bold text-[var(--color-accent)]">Accounts Payable</p>
         <h1 className="font-display text-3xl font-bold">Process Invoice Exception</h1>
         <p className="mt-2 text-[var(--color-muted)]">Upload an invoice to trigger 3-way matching and tolerance checks.</p>
       </header>
@@ -84,35 +93,35 @@ export default function InvoiceIntake() {
           </div>
           <div>
             <label htmlFor="priority" className="mb-2 block text-sm font-bold">Priority</label>
-            <select id="priority" value={priority} onChange={(event) => setPriority(event.target.value as typeof priority)} className="h-14 w-full rounded-2xl bg-transparent px-5 shadow-[var(--shadow-inset)] outline-none focus:ring-2 focus:ring-[var(--color-accent)]">
+            <Select id="priority" value={priority} onChange={(event) => setPriority(event.target.value as typeof priority)}>
               <option>LOW</option><option>NORMAL</option><option>HIGH</option><option>URGENT</option>
-            </select>
+            </Select>
           </div>
-          <div>
-            <label htmlFor="documents" className="mb-2 block text-sm font-bold">Invoice Document</label>
-            <label htmlFor="documents" className="flex cursor-pointer flex-col items-center rounded-3xl border-2 border-dashed border-[var(--color-accent)]/40 p-10 text-center focus-within:ring-2 focus-within:ring-[var(--color-accent)]">
-              <UploadCloud className="mb-3 h-10 w-10 text-[var(--color-accent)]" aria-hidden="true" />
-              <span className="font-bold">Choose PDF invoice</span>
-              <span className="mt-1 text-sm text-[var(--color-muted)]">Maximum 25 MB per file.</span>
-              <input id="documents" type="file" accept="application/pdf" multiple className="sr-only" onChange={(event) => setFiles(Array.from(event.target.files ?? []))} />
-            </label>
-            <ul className="mt-4 space-y-2" aria-live="polite">
-              {files.map((file) => <li key={`${file.name}-${file.size}`} className="flex items-center gap-2 text-sm"><FileCheck2 className="h-4 w-4 text-emerald-700" />{file.name} · {(file.size / 1024 / 1024).toFixed(2)} MB</li>)}
-            </ul>
-          </div>
-          {error && <p role="alert" className="rounded-xl border border-red-300 bg-red-50 p-4 text-sm text-red-900">{error}</p>}
-          {progress && <p aria-live="polite" className="rounded-xl bg-blue-50 p-4 text-sm text-blue-900">{progress}</p>}
-          <Button type="submit" variant="primary" disabled={busy || invoiceNumber.trim().length < 3 || !files.length} className="w-full disabled:cursor-not-allowed disabled:opacity-50">
+          <Dropzone
+            id="documents"
+            label="Invoice Document"
+            accept="application/pdf"
+            files={files}
+            onFilesChange={setFiles}
+            hint="Maximum 25 MB per file."
+          />
+          {error && <p role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-900">{error}</p>}
+          <ProgressSteps
+            steps={stepIndex === 1 && stepDetail ? [STEPS[0], `${STEPS[1]}: ${stepDetail}`, STEPS[2]] : STEPS}
+            currentIndex={stepIndex}
+            error={stepFailed}
+          />
+          <Button type="submit" variant="primary" disabled={busy || invoiceNumber.trim().length < 3 || !files.length} className="w-full">
             {busy ? "Processing…" : "Submit Invoice"}
           </Button>
         </Card>
         <aside className="space-y-6">
-          <Card className="p-6">
+          <Card>
             <Receipt className="mb-4 h-7 w-7 text-[var(--color-accent)]" />
             <h2 className="font-bold">Automated 3-Way Matching</h2>
             <p className="mt-2 text-sm leading-6 text-[var(--color-muted)]">The AI Agent will automatically extract line items and match them against Purchase Orders and Goods Receipt Notes.</p>
           </Card>
-          <Card className="p-6">
+          <Card>
             <h2 className="font-bold">Exception Handling</h2>
             <ol className="mt-3 list-decimal space-y-2 pl-5 text-sm text-[var(--color-muted)]">
               <li>Invoice line item extraction</li><li>PO and GRN matching</li><li>Tolerance and Variance checks</li><li>Fraud and duplicate detection</li><li>Automated resolution or manual review</li>

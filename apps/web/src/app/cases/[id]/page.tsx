@@ -8,6 +8,9 @@ import { ArrowLeft, CheckCircle2, FileSearch, ShieldAlert, XCircle } from "lucid
 import { api, type ApprovalTask } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { JsonViewer } from "@/components/ui/json-viewer";
+import { Table, Thead, Th, Tr, Td } from "@/components/ui/table";
 import { StatusChip } from "@/components/status-chip";
 import { CaseClarification } from "@/components/case-clarification";
 import { CaseDocumentReview } from "@/components/case-document-review";
@@ -102,7 +105,7 @@ export default function CaseDetail() {
   });
 
   if (caseQuery.isLoading) return <p className="p-12" aria-live="polite">Loading case…</p>;
-  if (caseQuery.isError || !caseQuery.data) return <p className="p-12 text-red-800" role="alert">Unable to load case: {caseQuery.error?.message}</p>;
+  if (caseQuery.isError || !caseQuery.data) return <p className="p-12 text-rose-800" role="alert">Unable to load case: {caseQuery.error?.message}</p>;
   const currentCase = caseQuery.data;
   const duplicateCandidates = Array.isArray(task?.evidence_packet.duplicate_candidates)
     ? task.evidence_packet.duplicate_candidates as Array<Record<string, unknown>>
@@ -143,7 +146,7 @@ export default function CaseDetail() {
         </div>
       </header>
       {ownership.isError && (
-        <p role="alert" className="mb-6 rounded-xl bg-red-50 p-3 text-sm text-red-900">
+        <p role="alert" className="mb-6 rounded-xl bg-rose-50 p-3 text-sm text-rose-900">
           Ownership change failed: {ownership.error.message}
         </p>
       )}
@@ -161,7 +164,7 @@ export default function CaseDetail() {
                   <div className="mt-1 h-3 w-3 rounded-full bg-[var(--color-accent)]" aria-hidden="true" />
                   <div>
                     <div className="flex flex-wrap items-center justify-between gap-2"><span className="font-bold">{event.event_type.replaceAll("_", " ")}</span><time className="text-xs text-[var(--color-muted)]">{new Date(event.created_at).toLocaleString()}</time></div>
-                    {Object.keys(event.payload).length > 0 && <pre className="mt-2 overflow-x-auto whitespace-pre-wrap rounded-xl bg-slate-900 p-3 text-xs text-slate-200">{JSON.stringify(event.payload, null, 2)}</pre>}
+                    {Object.keys(event.payload).length > 0 && <div className="mt-2"><JsonViewer data={event.payload} /></div>}
                   </div>
                 </li>
               ))}
@@ -172,83 +175,107 @@ export default function CaseDetail() {
             <div className="mb-6 flex items-center gap-3"><ShieldAlert className="h-6 w-6 text-[var(--color-accent)]" /><h2 className="font-display text-xl font-bold">Evidence and explanations</h2></div>
             <div className="space-y-4">
               {(evidence.data?.items ?? []).map((item) => (
-                <article key={item.evidence_item_id} className="rounded-2xl p-5 shadow-[var(--shadow-inset-sm)]">
-                  <div className="mb-2 flex flex-wrap items-center justify-between gap-2"><span className="rounded-full bg-slate-200 px-3 py-1 text-xs font-bold">{item.reason_code}</span>{item.confidence !== null && <span className="text-xs text-[var(--color-muted)]">Confidence {(item.confidence * 100).toFixed(0)}%</span>}</div>
+                <article key={item.evidence_item_id} className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-5">
+                  <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                    <span className="flex flex-wrap items-center gap-2">
+                      <Badge tone="neutral">{item.reason_code}</Badge>
+                      <Badge
+                        tone={item.is_authoritative ? "positive" : "warning"}
+                        className="cursor-default"
+                      >
+                        <span
+                          title={
+                            item.is_authoritative
+                              ? "Read from an authoritative source."
+                              : "Supplied by a party to this case, so it cannot verify itself."
+                          }
+                        >
+                          {item.provenance_label}
+                        </span>
+                      </Badge>
+                    </span>
+                    {item.confidence !== null && <span className="text-xs text-[var(--color-muted)]">Confidence {(item.confidence * 100).toFixed(0)}%</span>}
+                  </div>
                   <p className="text-sm">{item.claim}</p>
                   <p className="mt-2 text-xs text-[var(--color-muted)]">Source: {item.source_type}{item.source_id ? ` · ${item.source_id}` : ""}</p>
+                  {!item.is_authoritative && (
+                    <p className="mt-1 text-xs text-amber-800">
+                      Self-asserted evidence. Independent verification is required before it can
+                      support a control decision.
+                    </p>
+                  )}
                 </article>
               ))}
               {!evidence.isLoading && (evidence.data?.items ?? []).length === 0 && <p className="text-sm text-[var(--color-muted)]">Evidence is not ready yet. The case will remain visibly blocked if a mandatory source is unavailable.</p>}
             </div>
           </Card>
-          
+
           {currentCase.case_type === "INVOICE_EXCEPTION" && task?.evidence_packet && (
             <Card>
               <div className="mb-6 flex items-center gap-3"><FileSearch className="h-6 w-6 text-[var(--color-accent)]" /><h2 className="font-display text-xl font-bold">Invoice Analysis Details</h2></div>
               <div className="space-y-6">
-                
-                {/* Exceptions */}
+
                 {Array.isArray(task.evidence_packet.exception) && task.evidence_packet.exception.length > 0 && (
                   <div>
-                    <h3 className="font-bold text-sm mb-2 text-red-600">Detected Exceptions</h3>
+                    <h3 className="mb-2 text-sm font-bold text-rose-700">Detected Exceptions</h3>
                     <ul className="space-y-2">
                       {task.evidence_packet.exception.map((exception, index) => (
-                        <li key={`${exception.exception_type}-${index}`} className="text-sm bg-red-50 p-3 rounded-lg border border-red-100">
+                        <li key={`${exception.exception_type}-${index}`} className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm">
                           <span className="font-bold">{exception.exception_type}</span> ({exception.severity})
-                          <p className="text-xs mt-1">{exception.mismatch_details?.message}</p>
+                          <p className="mt-1 text-xs">{exception.mismatch_details?.message}</p>
                         </li>
                       ))}
                     </ul>
                   </div>
                 )}
-                
-                {/* 3-Way Match Result */}
+
                 {!!task.evidence_packet.match_result && (
                   <div>
-                    <h3 className="font-bold text-sm mb-2">3-Way Match Result: {task.evidence_packet.match_result.match_status}</h3>
+                    <h3 className="mb-2 text-sm font-bold">3-Way Match Result: {task.evidence_packet.match_result.match_status}</h3>
                     <p className="text-sm text-[var(--color-muted)]">Total Variance: {formatCurrency(task.evidence_packet.match_result.overall_variance_amount)} ({task.evidence_packet.match_result.overall_variance_pct?.toFixed(2)}%)</p>
-                    
-                    <div className="mt-4 overflow-x-auto">
-                      <table className="w-full text-sm text-left">
-                        <thead className="text-xs uppercase bg-slate-100">
-                          <tr>
-                            <th className="px-4 py-2">Line</th>
-                            <th className="px-4 py-2">Description</th>
-                            <th className="px-4 py-2">Inv Qty</th>
-                            <th className="px-4 py-2">PO/GRN Qty</th>
-                            <th className="px-4 py-2">Inv Price</th>
-                            <th className="px-4 py-2">PO Price</th>
-                            <th className="px-4 py-2">Status</th>
-                          </tr>
-                        </thead>
+
+                    <div className="mt-4 overflow-x-auto rounded-xl border border-[var(--color-border)]">
+                      <Table>
+                        <Thead>
+                          <Tr>
+                            <Th>Line</Th>
+                            <Th>Description</Th>
+                            <Th>Inv Qty</Th>
+                            <Th>PO/GRN Qty</Th>
+                            <Th>Inv Price</Th>
+                            <Th>PO Price</Th>
+                            <Th>Status</Th>
+                          </Tr>
+                        </Thead>
                         <tbody>
                           {(task.evidence_packet.match_result.line_matches || []).map((m, index) => (
-                            <tr key={`${m.invoice_line.line_number}-${index}`} className="border-b">
-                              <td className="px-4 py-2">{m.invoice_line?.line_number}</td>
-                              <td className="px-4 py-2">{m.invoice_line?.description}</td>
-                              <td className="px-4 py-2">{m.invoice_line?.quantity}</td>
-                              <td className="px-4 py-2">{m.grn_line?.quantity_received || m.po_line?.quantity || "-"}</td>
-                              <td className="px-4 py-2">{formatCurrency(m.invoice_line?.unit_price)}</td>
-                              <td className="px-4 py-2">{formatCurrency(m.po_line?.unit_price)}</td>
-                              <td className="px-4 py-2 font-bold">{m.match_status}</td>
-                            </tr>
+                            <Tr key={`${m.invoice_line.line_number}-${index}`}>
+                              <Td>{m.invoice_line?.line_number}</Td>
+                              <Td>{m.invoice_line?.description}</Td>
+                              <Td>{m.invoice_line?.quantity}</Td>
+                              <Td>{m.grn_line?.quantity_received || m.po_line?.quantity || "-"}</Td>
+                              <Td>{formatCurrency(m.invoice_line?.unit_price)}</Td>
+                              <Td>{formatCurrency(m.po_line?.unit_price)}</Td>
+                              <Td className="font-bold">{m.match_status}</Td>
+                            </Tr>
                           ))}
                         </tbody>
-                      </table>
+                      </Table>
                     </div>
                   </div>
                 )}
-                
-                {/* Tolerance Check */}
+
                 {!!task.evidence_packet.tolerance && (
-                  <div className="bg-slate-50 p-4 rounded-lg">
-                    <h3 className="font-bold text-sm mb-1">Tolerance Check</h3>
-                    <p className="text-sm">
-                      {task.evidence_packet.tolerance.within_tolerance ? "✅ Within Tolerance" : "❌ Exceeds Tolerance"}
-                      <span className="text-xs text-[var(--color-muted)] ml-2">
-                        (Threshold: {formatCurrency(task.evidence_packet.tolerance.threshold_amount)}, {task.evidence_packet.tolerance.threshold_pct}%)
+                  <div className="rounded-xl bg-[var(--color-surface-muted)] p-4">
+                    <h3 className="mb-2 text-sm font-bold">Tolerance Check</h3>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge tone={task.evidence_packet.tolerance.within_tolerance ? "positive" : "negative"}>
+                        {task.evidence_packet.tolerance.within_tolerance ? "Within tolerance" : "Exceeds tolerance"}
+                      </Badge>
+                      <span className="text-xs text-[var(--color-muted)]">
+                        Threshold: {formatCurrency(task.evidence_packet.tolerance.threshold_amount)}, {task.evidence_packet.tolerance.threshold_pct}%
                       </span>
-                    </p>
+                    </div>
                   </div>
                 )}
               </div>
@@ -268,23 +295,23 @@ export default function CaseDetail() {
               </div>
               <div className="grid gap-5 lg:grid-cols-2">
                 {duplicateCandidates.map((candidate, index) => (
-                  <article key={String(candidate.vendor_id ?? index)} className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+                  <article key={String(candidate.vendor_id ?? index)} className="rounded-xl border border-amber-200 bg-amber-50 p-4">
                     <p className="text-xs font-bold uppercase tracking-wider text-amber-900">Duplicate candidate</p>
                     <p className="mt-2 font-bold">{String(candidate.name ?? candidate.vendor_id ?? "Existing vendor")}</p>
                     <p className="mt-1 text-sm">Score {Math.round(Number(candidate.score ?? 0) * 100)}%</p>
-                    <pre className="mt-3 overflow-auto whitespace-pre-wrap text-xs">{JSON.stringify(candidate.signals ?? {}, null, 2)}</pre>
+                    <div className="mt-3"><JsonViewer data={candidate.signals ?? {}} /></div>
                   </article>
                 ))}
                 {sanctionsCandidates.map((candidate, index) => (
-                  <article key={String(candidate.entity_id ?? index)} className="rounded-2xl border border-red-200 bg-red-50 p-4">
-                    <p className="text-xs font-bold uppercase tracking-wider text-red-900">Sanctions candidate</p>
+                  <article key={String(candidate.entity_id ?? index)} className="rounded-xl border border-rose-200 bg-rose-50 p-4">
+                    <p className="text-xs font-bold uppercase tracking-wider text-rose-900">Sanctions candidate</p>
                     <p className="mt-2 font-bold">{String(candidate.matched_name ?? candidate.entity_id ?? "Listed entity")}</p>
                     <p className="mt-1 text-sm">{String(candidate.source ?? "Official list")} · version {String(candidate.version ?? "unknown")}</p>
                     <p className="mt-1 text-sm">Similarity {Math.round(Number(candidate.score ?? 0) * 100)}%</p>
                   </article>
                 ))}
               </div>
-              <p className="mt-5 rounded-xl bg-slate-100 p-3 text-sm">
+              <p className="mt-5 rounded-xl bg-[var(--color-surface-muted)] p-3 text-sm">
                 What resolves this: record an evidence-bound disposition on the pending {task?.task_type.replaceAll("_", " ").toLowerCase()} task. The next control is created only after this decision is committed.
               </p>
             </Card>
@@ -297,14 +324,14 @@ export default function CaseDetail() {
             {task ? (
               <>
                 <p className="mt-2 text-sm text-[var(--color-muted)]">Review the evidence before acting. This decision is bound to case version {task.case_version} and hash:</p>
-                <p className="mt-2 rounded-full bg-amber-100 px-3 py-1 text-xs font-bold text-amber-900">{task.task_type.replaceAll("_", " ")}</p>
-                <code className="mt-4 block break-all rounded-xl bg-slate-900 p-3 text-xs text-slate-200">{task.evidence_hash}</code>
+                <Badge tone="warning" className="mt-2">{task.task_type.replaceAll("_", " ")}</Badge>
+                <code className="mt-4 block break-all rounded-xl bg-[var(--color-ink)] p-3 text-xs text-slate-200">{task.evidence_hash}</code>
                 <label htmlFor="decision-comment" className="mb-2 mt-5 block text-sm font-bold">Decision comment</label>
-                <textarea id="decision-comment" value={comment} onChange={(event) => setComment(event.target.value)} rows={4} className="w-full rounded-2xl bg-transparent p-4 shadow-[var(--shadow-inset)] outline-none focus:ring-2 focus:ring-[var(--color-accent)]" placeholder="Required when rejecting; recommended for approval" />
-                {decisionError && <p role="alert" className="mt-3 rounded-xl bg-red-50 p-3 text-sm text-red-900">{decisionError}</p>}
+                <textarea id="decision-comment" value={comment} onChange={(event) => setComment(event.target.value)} rows={4} className="w-full rounded-xl border border-[var(--color-border)] bg-white p-4 text-sm shadow-[var(--shadow-xs)] outline-none focus:border-[var(--color-accent)] focus:ring-2 focus:ring-[var(--color-accent)]/25" placeholder="Required when rejecting; recommended for approval" />
+                {decisionError && <p role="alert" className="mt-3 rounded-xl bg-rose-50 p-3 text-sm text-rose-900">{decisionError}</p>}
                 <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                  <Button type="button" variant="secondary" disabled={decide.isPending || !comment.trim()} onClick={() => decide.mutate({ task, decision: "REJECTED" })} className="gap-2 text-red-700 disabled:opacity-50"><XCircle className="h-4 w-4" />Reject</Button>
-                  <Button type="button" variant="primary" disabled={decide.isPending} onClick={() => decide.mutate({ task, decision: "APPROVED" })} className="gap-2 disabled:opacity-50"><CheckCircle2 className="h-4 w-4" />Approve</Button>
+                  <Button type="button" variant="destructive" disabled={decide.isPending || !comment.trim()} onClick={() => decide.mutate({ task, decision: "REJECTED" })} className="gap-2"><XCircle className="h-4 w-4" />Reject</Button>
+                  <Button type="button" variant="primary" disabled={decide.isPending} onClick={() => decide.mutate({ task, decision: "APPROVED" })} className="gap-2"><CheckCircle2 className="h-4 w-4" />Approve</Button>
                 </div>
               </>
             ) : <p className="mt-3 text-sm text-[var(--color-muted)]">There is no pending approval task for this case.</p>}
