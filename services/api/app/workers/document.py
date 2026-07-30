@@ -11,6 +11,12 @@ from typing import Any
 
 from app.config import settings
 from app.domain.cases import CaseStatus
+from app.domain.extraction import (
+    email_domain,
+    extract_labelled_fields,
+    normalize_country,
+    parse_date,
+)
 from app.domain.pii import mask_sensitive_text
 from app.domain.security import (
     blind_index,
@@ -39,15 +45,38 @@ from app.workers.common import consume
 from app.workers.database import WorkerSession, set_worker_tenant
 from sqlalchemy import func, select
 
-FIELD_PATTERNS = {
-    "legal_name": re.compile(r"(?:legal\s+name|name)\s*[:\-]\s*([^\n]{2,160})", re.I),
-    "tax_id": re.compile(r"(?:TIN|tax(?:payer)?\s*(?:identification)?\s*(?:number|id))\s*[:\-]\s*([A-Z0-9 -]{6,30})", re.I),
-    "bank_account": re.compile(r"(?:account(?:\s+number)?|IBAN)\s*[:\-]\s*([A-Z0-9 -]{8,40})", re.I),
-    "swift_code": re.compile(r"(?:SWIFT|BIC)(?:\s+code)?\s*[:\-]\s*([A-Z0-9]{8,11})", re.I),
-    "address": re.compile(r"address\s*[:\-]\s*([^\n]{5,240})", re.I),
-}
 EMAIL_PATTERN = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.I)
 PHONE_PATTERN = re.compile(r"(?<!\w)(?:\+?\d[\d ()-]{7,}\d)(?!\w)")
+
+EXTRACTOR_VERSION = "3.0.0"
+
+# Fields whose plaintext must never leave the database unencrypted.
+#
+# Personal contact details are included even though no control consumes them:
+# a field nothing reads is a field nobody notices leaking, and it still flows
+# into event payloads and anything that renders the extraction.
+#
+# Two deliberate exclusions:
+#   email_domain - a domain is public, and the duplicate detector compares it.
+#   bank_beneficiary_name - the bank-consistency control compares it against
+#     the legal name, which needs the plaintext. Masking it would disable the
+#     control that exists to catch a beneficiary mismatch.
+SENSITIVE_FIELDS = frozenset(
+    {
+        "tax_id",
+        "bank_account",
+        "swift_code",
+        "registered_address",
+        "email",
+        "telephone",
+        "primary_contact",
+        "beneficial_owner",
+        "received_by",
+    }
+)
+
+# Fields whose absence or low confidence blocks unattended processing.
+CRITICAL_FIELDS = frozenset({"tax_id", "bank_account"})
 
 
 def confidence_grade(confidence: float | None) -> str:
@@ -62,58 +91,147 @@ def confidence_grade(confidence: float | None) -> str:
     return "POOR"
 
 
-def extraction_candidate(
-    pages: list[tuple[int, str, dict]],
-    field_name: str,
-    pattern: re.Pattern[str],
-) -> dict[str, Any] | None:
-    for page_number, text, layout in pages:
-        match = pattern.search(text)
-        if not match:
+def _page_confidence(layout: dict) -> float:
+    route = str(layout.get("route") or layout.get("parser") or "unknown")
+    route_confidence = layout.get("confidence")
+    if isinstance(route_confidence, (int, float)):
+        return float(route_confidence)
+    return 0.99 if route in {"native", "pypdf"} else 0.85
+
+
+def _locate_bbox(layout: dict, value: str) -> dict[str, Any]:
+    for item in layout.get("items", []):
+        item_text = str(item.get("text", ""))
+        if not item_text:
             continue
-        raw = " ".join(match.group(1).split())
-        source_bbox: dict[str, Any] = {}
-        for item in layout.get("items", []):
-            item_text = str(item.get("text", ""))
-            if raw.lower() in item_text.lower() or item_text.lower() in raw.lower():
-                source_bbox = {"bbox": item.get("bbox")}
-                break
-        route = str(layout.get("route") or layout.get("parser") or "unknown")
-        route_confidence = layout.get("confidence")
-        confidence = (
-            float(route_confidence)
-            if isinstance(route_confidence, (int, float))
-            else 0.99
-            if route == "native"
-            else 0.85
+        if value.lower() in item_text.lower() or item_text.lower() in value.lower():
+            return {"bbox": item.get("bbox")}
+    return {}
+
+
+def validate_field(field_name: str, value: str) -> list[dict[str, Any]]:
+    """Run the checks that apply to this field. Cheap, and worth the name.
+
+    Length checks alone let a transposed digit through, so identifiers that
+    carry a checksum get their checksum verified.
+    """
+    validations: list[dict[str, Any]] = [
+        {"rule": "NON_EMPTY", "passed": bool(value.strip())}
+    ]
+    compact = re.sub(r"\s+", "", value)
+    if field_name == "swift_code":
+        validations.append(
+            {
+                "rule": "BIC_STRUCTURE",
+                "passed": bool(
+                    re.fullmatch(r"[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}([A-Z0-9]{3})?", compact, re.I)
+                ),
+            }
         )
-        validations = [{"rule": "NON_EMPTY", "passed": bool(raw)}]
-        if field_name == "swift_code":
-            validations.append(
-                {
-                    "rule": "SWIFT_LENGTH",
-                    "passed": bool(re.fullmatch(r"[A-Z0-9]{8,11}", raw, re.I)),
+    if field_name in CRITICAL_FIELDS:
+        validations.append(
+            {
+                "rule": "CRITICAL_IDENTIFIER_LENGTH",
+                "passed": 6 <= len(compact) <= 40,
+            }
+        )
+    if field_name == "bank_account" and re.fullmatch(r"[A-Z]{2}\d{2}[A-Z0-9]{10,30}", compact, re.I):
+        validations.append({"rule": "IBAN_CHECKSUM", "passed": iban_checksum_valid(compact)})
+    if field_name in {"registered_country", "bank_country"}:
+        validations.append(
+            {"rule": "KNOWN_COUNTRY", "passed": normalize_country(value) is not None}
+        )
+    if field_name in {
+        "invoice_date",
+        "due_date",
+        "effective_date",
+        "certificate_valid_until",
+        "order_date",
+        "receipt_date",
+    }:
+        validations.append({"rule": "PARSEABLE_DATE", "passed": parse_date(value) is not None})
+    return validations
+
+
+def iban_checksum_valid(value: str) -> bool:
+    """ISO 13616 mod-97 check. A structurally valid IBAN can still be wrong."""
+    compact = re.sub(r"\s+", "", value).upper()
+    if not re.fullmatch(r"[A-Z]{2}\d{2}[A-Z0-9]{10,30}", compact):
+        return False
+    rearranged = compact[4:] + compact[:4]
+    digits = "".join(
+        str(ord(character) - 55) if character.isalpha() else character
+        for character in rearranged
+    )
+    return int(digits) % 97 == 1
+
+
+def normalize_extracted_value(field_name: str, raw: str, sensitive: bool) -> str:
+    """Produce the comparable form the controls actually match on.
+
+    Sensitive identifiers become a blind index, so duplicate and bank-change
+    detection can compare them without ever storing the plaintext. Countries
+    become ISO codes, so a form saying "Sri Lanka" and one saying "LK" compare
+    equal. Everything else is upper-cased for a stable comparison.
+    """
+    if sensitive:
+        return blind_index(raw, settings.BLIND_INDEX_SECRET).hex()
+    if field_name == "legal_name":
+        return normalize_vendor_name(raw)
+    if field_name in {"registered_country", "bank_country"}:
+        return normalize_country(raw) or raw.upper()
+    if field_name == "email_domain":
+        return raw.lower()
+    return raw.upper()
+
+
+def extraction_candidates(
+    pages: list[tuple[int, str, dict]],
+) -> dict[str, dict[str, Any]]:
+    """Extract every known field across the document, with its page locator.
+
+    The first page that states a field wins, matching how documents work:
+    the authoritative statement of a fact precedes any later restatement.
+    """
+    candidates: dict[str, dict[str, Any]] = {}
+    for page_number, text, layout in pages:
+        page_confidence = _page_confidence(layout)
+        for field_name, found in extract_labelled_fields(text).items():
+            if field_name in candidates:
+                continue
+            validations = validate_field(field_name, found.value)
+            confidence = page_confidence
+            if not all(item["passed"] for item in validations):
+                confidence = min(confidence, 0.59)
+            candidates[field_name] = {
+                "raw": found.value,
+                "source_page": page_number,
+                "source_bbox": _locate_bbox(layout, found.value),
+                "confidence": round(confidence, 4),
+                "confidence_grade": confidence_grade(confidence),
+                "validation_results": validations,
+                "extractor_version": EXTRACTOR_VERSION,
+                "label": found.label,
+                "label_form": found.form,
+            }
+
+        # The duplicate detector scores on email domain, so derive it here
+        # rather than making every consumer re-parse the address.
+        if "email_domain" not in candidates:
+            domain = email_domain(text)
+            if domain:
+                candidates["email_domain"] = {
+                    "raw": domain,
+                    "source_page": page_number,
+                    "source_bbox": _locate_bbox(layout, domain),
+                    "confidence": round(page_confidence, 4),
+                    "confidence_grade": confidence_grade(page_confidence),
+                    "validation_results": [{"rule": "NON_EMPTY", "passed": True}],
+                    "extractor_version": EXTRACTOR_VERSION,
+                    "label": "email",
+                    "label_form": "derived",
                 }
-            )
-        if field_name in {"tax_id", "bank_account"}:
-            validations.append(
-                {
-                    "rule": "CRITICAL_IDENTIFIER_LENGTH",
-                    "passed": 6 <= len(re.sub(r"\s+", "", raw)) <= 40,
-                }
-            )
-        if not all(item["passed"] for item in validations):
-            confidence = min(confidence, 0.59)
-        return {
-            "raw": raw,
-            "source_page": page_number,
-            "source_bbox": source_bbox,
-            "confidence": round(confidence, 4),
-            "confidence_grade": confidence_grade(confidence),
-            "validation_results": validations,
-            "extractor_version": "2.0.0",
-        }
-    return None
+    return candidates
 
 
 def scan_with_clamav(path: Path) -> tuple[bool, str]:
@@ -329,8 +447,21 @@ def extract_document(path: Path, mime_type: str) -> tuple[list[tuple[int, str, d
 
 
 def mask_page(text: str) -> str:
-    for pattern in (FIELD_PATTERNS["tax_id"], FIELD_PATTERNS["bank_account"], FIELD_PATTERNS["swift_code"], FIELD_PATTERNS["address"]):
-        text = pattern.sub(lambda match: match.group(0).replace(match.group(1), "<SENSITIVE_VALUE>"), text)
+    """Redact sensitive values before the page text is persisted or shown.
+
+    Masking is driven by the same label extraction the controls use, so a
+    field the extractor can find is a field the masker can hide. Every
+    occurrence of the value is replaced, not just the labelled one - the same
+    account number often appears again in a payment-reference line.
+    """
+    for field_name, found in extract_labelled_fields(text).items():
+        if field_name not in SENSITIVE_FIELDS:
+            continue
+        if len(found.value) < 4:
+            # Too short to replace safely; a two-character value would match
+            # fragments of unrelated words across the page.
+            continue
+        text = text.replace(found.value, "<SENSITIVE_VALUE>")
     text = EMAIL_PATTERN.sub("<EMAIL_ADDRESS>", text)
     text = PHONE_PATTERN.sub("<PHONE_NUMBER>", text)
     return mask_sensitive_text(text)
@@ -405,16 +536,10 @@ async def process_document_event(envelope: dict) -> None:
                     text_content=mask_page(text), layout_json={**layout, "pii_masked": True},
                     ocr_confidence=layout.get("confidence"),
                 ))
-            for field_name, pattern in FIELD_PATTERNS.items():
-                candidate = extraction_candidate(pages, field_name, pattern)
-                if not candidate:
-                    continue
+            for field_name, candidate in extraction_candidates(pages).items():
                 raw = candidate["raw"]
-                sensitive = field_name in {"tax_id", "bank_account", "swift_code", "address"}
-                normalized = (
-                    blind_index(raw, settings.BLIND_INDEX_SECRET).hex() if sensitive
-                    else normalize_vendor_name(raw) if field_name == "legal_name" else raw.upper()
-                )
+                sensitive = field_name in SENSITIVE_FIELDS
+                normalized = normalize_extracted_value(field_name, raw, sensitive)
                 session.add(ExtractedField(
                     tenant_id=tenant_id, document_id=document_id, field_name=field_name,
                     field_value_masked=f"<{field_name.upper()}>" if sensitive else raw,
@@ -425,12 +550,12 @@ async def process_document_event(envelope: dict) -> None:
                     validation_results=candidate["validation_results"],
                     source_page=candidate["source_page"],
                     source_bbox=candidate["source_bbox"],
-                    extractor_type="deterministic-regex",
+                    extractor_type="deterministic-label",
                     extractor_version=candidate["extractor_version"],
                     human_verified=False,
                 ))
                 if (
-                    field_name in {"tax_id", "bank_account"}
+                    field_name in CRITICAL_FIELDS
                     and candidate["confidence"] < 0.90
                 ):
                     await upsert_risk_finding(

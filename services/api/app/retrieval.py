@@ -39,8 +39,13 @@ def ensure_collection() -> None:
         vectors_config={"dense": models.VectorParams(size=384, distance=models.Distance.COSINE)},
         sparse_vectors_config={"sparse": models.SparseVectorParams(index=models.SparseIndexParams(on_disk=False))},
     )
-    for field in ("tenant_id", "status", "policy_version_id", "effective_date", "acl"):
+    for field in ("tenant_id", "status", "policy_version_id", "acl"):
         client.create_payload_index(COLLECTION, field, models.PayloadSchemaType.KEYWORD)
+    # DATETIME (not KEYWORD) is what makes a Range comparison possible below.
+    # A keyword index only supports exact match, so a query filtering on
+    # "effective on or before this date" always failed - every retrieval
+    # request raised a 500 rather than returning an empty or matching result.
+    client.create_payload_index(COLLECTION, "effective_date", models.PayloadSchemaType.DATETIME)
 
 
 def index_chunks(chunks: list[dict[str, Any]]) -> None:
@@ -71,7 +76,7 @@ def hybrid_search(query: str, tenant_id: str, roles: list[str], effective_date: 
         models.FieldCondition(key="tenant_id", match=models.MatchValue(value=tenant_id)),
         models.FieldCondition(key="status", match=models.MatchValue(value="PUBLISHED")),
         models.FieldCondition(key="acl", match=models.MatchAny(any=roles)),
-        models.FieldCondition(key="effective_date", range=models.Range(lte=effective_date)),
+        models.FieldCondition(key="effective_date", range=models.DatetimeRange(lte=effective_date)),
     ]
     result = qdrant().query_points(
         COLLECTION,

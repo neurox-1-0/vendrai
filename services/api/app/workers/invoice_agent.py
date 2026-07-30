@@ -15,7 +15,16 @@ from app.agents.planning import (
 from app.agents.workflow import tenant_workflow, workflow_config
 from app.config import settings
 from app.domain.cases import CaseStatus
+from app.domain.extraction import extract, parse_money
 from app.domain.fraud import robust_mad_score
+from app.domain.invoice_checks import (
+    check_arithmetic,
+    check_currency_consistency,
+    evaluate_price_tolerance,
+    evaluate_tax_rate,
+    find_quantity_overruns,
+)
+from app.domain.provenance import Provenance
 from app.domain.security import canonical_hash, normalize_vendor_name
 from app.llm_gateway import LLMProviderError
 from app.models import (
@@ -42,33 +51,25 @@ from app.models import (
 from app.services.events import append_audit, append_case_event, enqueue_event
 from app.services.live_progress import specialist_progress_callback
 from app.services.risk import upsert_risk_finding
+from app.services.tenant_settings import get_tenant_configuration
 from app.workers.common import consume
 from app.workers.database import WorkerSession, set_worker_tenant
 from sqlalchemy import delete, func, select
 
-INVOICE_NUMBER = re.compile(
-    r"(?:invoice\s+(?:number|no\.?|#)|tax\s+invoice\s+no|inv)[:\s]+([A-Z0-9][A-Z0-9./-]{2,})",
-    re.IGNORECASE,
-)
-PO_NUMBER = re.compile(
-    r"(?:po\s+(?:number|ref|#|no\.?)|purchase\s+order)[:\s]+([A-Z0-9][A-Z0-9./-]{2,})",
-    re.IGNORECASE,
-)
-CURRENCY = re.compile(r"\b(USD|EUR|GBP|LKR|AUD|CAD|JPY|INR|SGD)\b", re.IGNORECASE)
-TOTAL_AMOUNT = re.compile(
-    r"(?:grand\s+total|amount\s+due|total\s+due|invoice\s+total|total)[:\s]+(?:[A-Z]{3}\s*)?([\d,]+(?:\.\d{1,4})?)",
-    re.IGNORECASE,
-)
-TAX_AMOUNT = re.compile(
-    r"(?:tax|vat)\s*(?:amount)?[:\s]+(?:[A-Z]{3}\s*)?([\d,]+(?:\.\d{1,4})?)",
-    re.IGNORECASE,
-)
-TAX_RATE = re.compile(r"(?:vat|tax)\s*(?:rate)?[:\s]*(\d+(?:\.\d+)?)\s*%", re.IGNORECASE)
-LINE_PATTERN = re.compile(
-    r"(?m)^\s*(\d+)\s+(.+?)\s+(\d+(?:\.\d+)?)\s+(?:[A-Z]{3}\s*)?([\d,]+(?:\.\d{1,4})?)\s+(?:[A-Z]{3}\s*)?([\d,]+(?:\.\d{1,4})?)\s*$"
-)
-GRN_LINE_PATTERN = re.compile(
-    r"(?m)^\s*(\d+)\s+(.+?)\s+(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s*$"
+# The capability IDs this worker can actually execute. Kept in lockstep with
+# the registry by tests/test_capability_registry.py. See plans/91-decisions.md
+# ADR-002.
+INVOICE_EXECUTORS = frozenset(
+    {
+        "document_intelligence",
+        "po_retrieval",
+        "grn_retrieval",
+        "vendor_resolution",
+        "duplicate_invoice",
+        "policy_retrieval",
+        "three_way_match",
+        "bank_consistency",
+    }
 )
 
 
@@ -85,98 +86,166 @@ def _money(value: Decimal) -> float:
     return float(value.quantize(Decimal("0.01")))
 
 
-def _first_match(pattern: re.Pattern[str], text: str) -> str | None:
-    match = pattern.search(text)
-    return match.group(1).strip() if match else None
+def _optional_decimal(value: object) -> Decimal | None:
+    """Distinguish "stated as zero" from "not stated at all".
+
+    _decimal() coerces None to zero, which for a tax rate would turn a missing
+    value into a confident claim of 0%.
+    """
+    if value is None or value == "":
+        return None
+    try:
+        return Decimal(str(value))
+    except (ArithmeticError, TypeError, ValueError):
+        return None
+
+
+# Values a document uses to say "this field does not apply" - AP-006 prints
+# "Not stated" against the purchase order label. Treating that as a PO number
+# would make a deliberately-missing reference look present.
+_ABSENT_VALUES = frozenset(
+    {"not stated", "none", "n/a", "na", "not applicable", "-", "--"}
+)
+
+
+def _match_provenance(po_source: str, grn_source: str) -> Provenance:
+    """A three-way match is only as authoritative as its weakest reference.
+
+    If either side came from a document the requester uploaded, the match
+    cannot claim to have been made against the system of record.
+    """
+    if "UPLOADED" in po_source or "UPLOADED" in grn_source:
+        return Provenance.USER_UPLOADED
+    if po_source == "ERP_DATABASE" and grn_source == "ERP_DATABASE":
+        return Provenance.ERP_SYSTEM_OF_RECORD
+    return Provenance.DERIVED_BY_SYSTEM
+
+
+def _stated(value: str | None) -> str | None:
+    if not value:
+        return None
+    return None if " ".join(value.split()).lower() in _ABSENT_VALUES else value.strip()
 
 
 def extract_invoice_from_text(text: str) -> tuple[dict[str, Any] | None, list[str]]:
     """Extract only supported deterministic fields from locally masked page text."""
-    invoice_number = _first_match(INVOICE_NUMBER, text)
-    total_text = _first_match(TOTAL_AMOUNT, text)
-    currency = (_first_match(CURRENCY, text) or "").upper()
-    po_number = _first_match(PO_NUMBER, text)
+    result = extract(text)
+    invoice_number = _stated(result.value("invoice_number"))
+    currency, total_amount = parse_money(result.value("gross_amount"))
+    currency = (currency or result.value("currency") or "").upper()
+    po_number = _stated(result.value("po_number"))
+
     missing: list[str] = []
     if not invoice_number:
         missing.append("invoice_number")
-    if not total_text:
+    if total_amount is None:
         missing.append("total_amount")
     if not currency:
         missing.append("currency")
 
-    line_items: list[dict[str, Any]] = []
-    for match in LINE_PATTERN.finditer(text):
-        line_number, description, quantity, unit_price, amount = match.groups()
-        line_items.append(
-            {
-                "line_number": int(line_number),
-                "description": " ".join(description.split())[:500],
-                "quantity": float(_decimal(quantity)),
-                "unit_price": _money(_decimal(unit_price)),
-                "amount": _money(_decimal(amount)),
-                "tax_rate": float(_decimal(_first_match(TAX_RATE, text) or "0")),
-                "po_line_ref": line_number,
-            }
-        )
+    tax_rate = result.tax_rate_percent or Decimal("0")
+    line_items: list[dict[str, Any]] = [
+        {
+            "line_number": item.line_number,
+            "description": item.description[:500],
+            "quantity": float(item.quantity or 0),
+            "unit_price": _money(item.unit_price or Decimal("0")),
+            "amount": _money(item.line_total or Decimal("0")),
+            "tax_rate": float(tax_rate),
+            "po_line_ref": str(item.line_number) if item.line_number else None,
+        }
+        for item in result.line_items
+        if item.line_number is not None
+    ]
     if not line_items:
         missing.append("line_items")
     if missing:
         return None, missing
 
-    vendor_name = next(
-        (
-            " ".join(line.split())[:240]
-            for line in text.splitlines()[:10]
-            if len(line.strip()) >= 3
-            and not any(marker in line.upper() for marker in ("INVOICE", "PAGE ", "BILL TO", "SHIP TO"))
-        ),
-        None,
-    )
-    tax_text = _first_match(TAX_AMOUNT, text)
     return (
         {
             "invoice_number": invoice_number,
             "po_reference": po_number,
-            "vendor_name": vendor_name,
-            "total_amount": _money(_decimal(total_text)),
-            "tax_amount": _money(_decimal(tax_text)),
-            "tax_rate": float(_decimal(_first_match(TAX_RATE, text) or "0")),
+            "vendor_name": _vendor_name_from_letterhead(text),
+            "total_amount": _money(total_amount),
+            "tax_amount": _money(result.tax_amount or Decimal("0")),
+            "tax_rate": float(tax_rate),
             "currency": currency,
             "line_items": line_items,
+            # Partial table extraction must reach the caller. Matching on the
+            # rows we happened to parse, while silently dropping one we did
+            # not, is how a quantity variance disappears.
+            "line_items_complete": result.line_item_extraction_complete,
+            "subtotal": _money(parse_money(result.value("subtotal"))[1] or Decimal("0")),
+            "invoice_date": result.value("invoice_date"),
+            "due_date": result.value("due_date"),
+            # Tax ID and bank account are deliberately absent. This text is
+            # the masked page content, so they read <SENSITIVE_VALUE> here;
+            # the authoritative values live as blind indexes on ExtractedField.
+            "bank_beneficiary_name": result.value("bank_beneficiary_name"),
         },
         [],
     )
 
 
+def _vendor_name_from_letterhead(text: str) -> str | None:
+    """Take the supplier name from the letterhead when no label states it.
+
+    Corpus documents open with a two-letter logo mark, then the supplier's
+    legal name. Skipping obvious document furniture gets the right line.
+    """
+    skip = ("INVOICE", "PAGE ", "BILL TO", "SHIP TO", "PURCHASE ORDER", "GOODS RECEIPT")
+    for line in text.splitlines()[:10]:
+        candidate = " ".join(line.split())
+        if len(candidate) < 4 or candidate.upper() == candidate and len(candidate) <= 3:
+            continue
+        if any(marker in candidate.upper() for marker in skip):
+            continue
+        return candidate[:240]
+    return None
+
+
 def parse_po_text(text: str) -> dict[str, Any]:
-    lines: dict[int, dict[str, Any]] = {}
-    for match in LINE_PATTERN.finditer(text):
-        line_number, description, quantity, unit_price, amount = match.groups()
-        lines[int(line_number)] = {
-            "line_number": int(line_number),
-            "description": " ".join(description.split())[:500],
-            "quantity": float(_decimal(quantity)),
-            "unit_price": _money(_decimal(unit_price)),
-            "amount": _money(_decimal(amount)),
+    result = extract(text)
+    lines: dict[int, dict[str, Any]] = {
+        item.line_number: {
+            "line_number": item.line_number,
+            "description": item.description[:500],
+            "quantity": float(item.quantity or 0),
+            "unit_price": _money(item.unit_price or Decimal("0")),
+            "amount": _money(item.line_total or Decimal("0")),
         }
+        for item in result.line_items
+        if item.line_number is not None
+    }
     return {
-        "po_number": _first_match(PO_NUMBER, text),
-        "tax_rate": float(_decimal(_first_match(TAX_RATE, text) or "0")),
+        "po_number": _stated(result.value("po_number")),
+        "tax_rate": float(result.tax_rate_percent or 0),
+        "currency": (parse_money(result.value("gross_amount"))[0] or result.value("currency") or "").upper() or None,
         "lines": lines,
+        "lines_complete": result.line_item_extraction_complete,
     }
 
 
 def parse_grn_text(text: str) -> dict[str, Any]:
-    lines: dict[int, dict[str, Any]] = {}
-    for match in GRN_LINE_PATTERN.finditer(text):
-        line_number, description, ordered, received = match.groups()
-        lines[int(line_number)] = {
-            "line_number": int(line_number),
-            "description": " ".join(description.split())[:500],
-            "ordered": float(_decimal(ordered)),
-            "received": float(_decimal(received)),
+    result = extract(text)
+    lines: dict[int, dict[str, Any]] = {
+        item.line_number: {
+            "line_number": item.line_number,
+            "description": item.description[:500],
+            "ordered": float(item.quantity or 0),
+            "received": float(item.quantity_received or 0),
+            "condition": item.condition,
         }
-    return {"lines": lines}
+        for item in result.line_items
+        if item.line_number is not None
+    }
+    return {
+        "grn_number": result.value("grn_number"),
+        "po_number": _stated(result.value("po_number")),
+        "lines": lines,
+        "lines_complete": result.line_item_extraction_complete,
+    }
 
 
 def check_missing_po(extracted_invoice: dict[str, Any], all_case_docs: list[Any], po_data: dict[str, Any]) -> bool:
@@ -185,23 +254,6 @@ def check_missing_po(extracted_invoice: dict[str, Any], all_case_docs: list[Any]
     return not bool(po_data.get("lines"))
 
 
-def check_tax_mismatch(extracted_invoice: dict[str, Any], po_data: dict[str, Any]) -> dict[str, Any]:
-    invoice_rate = _decimal(extracted_invoice.get("tax_rate"))
-    expected_rate = _decimal(po_data.get("tax_rate"))
-    if expected_rate == 0:
-        return {"mismatch": False, "unverified": True}
-    if abs(invoice_rate - expected_rate) > Decimal("0.1"):
-        return {
-            "mismatch": True,
-            "unverified": False,
-            "invoice_tax_rate": float(invoice_rate),
-            "expected_tax_rate": float(expected_rate),
-            "message": (
-                f"Tax mismatch detected: invoice rate {invoice_rate}% does not match the verified PO rate "
-                f"{expected_rate}%."
-            ),
-        }
-    return {"mismatch": False, "unverified": False}
 
 
 async def _document_text(session, document_id: uuid.UUID) -> str:
@@ -250,15 +302,40 @@ async def _verified_invoice_corrections(
     )
 
 
+# Title heading -> document kind. Ordered most specific first.
+_DOCUMENT_TITLES: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"^GOODS\s+RECEIPT(\s+NOTE)?$"), "GOODS_RECEIPT"),
+    (re.compile(r"^(TAX\s+)?INVOICE$"), "INVOICE"),
+    (re.compile(r"^PURCHASE\s+ORDER$"), "PURCHASE_ORDER"),
+)
+
+
 def detect_document_type(text: str) -> str | None:
-    """Classify a supported AP document from locally extracted text."""
+    """Classify a supported AP document from locally extracted text.
+
+    Classification reads the document's own title heading, not a substring
+    search over the whole body. An invoice carries a "Purchase order" *label*
+    naming the PO it bills against, so a body-wide search for that phrase
+    classifies every invoice in the corpus as a purchase order - and then the
+    three-way match compares the invoice against itself.
+    """
+    for line in text.splitlines()[:40]:
+        heading = " ".join(line.split()).upper().strip(":.")
+        if not heading or heading != heading.upper():
+            continue
+        for pattern, kind in _DOCUMENT_TITLES:
+            if pattern.match(heading):
+                return kind
+
+    # No title heading (a scan, or an unusual layout). Fall back to distinctive
+    # identifier labels, which are unambiguous in a way the phrases are not.
     upper = text.upper()
-    if "GOODS RECEIPT" in upper or re.search(r"\bGRN(?:\s+NO|\s*#|[-:])", upper):
+    if re.search(r"\bGRN[-\s]?\d|RECEIPT\s+NUMBER", upper):
         return "GOODS_RECEIPT"
-    if "PURCHASE ORDER" in upper:
-        return "PURCHASE_ORDER"
-    if "TAX INVOICE" in upper or re.search(r"\bINVOICE(?:\s+NO|\s*#|[-:])", upper):
+    if re.search(r"\bINVOICE\s+NUMBER\b", upper):
         return "INVOICE"
+    if re.search(r"\bPO[-\s]?\d{4}", upper):
+        return "PURCHASE_ORDER"
     return None
 
 
@@ -735,6 +812,9 @@ async def run_invoice_analysis(envelope: dict[str, Any]) -> None:
             run = await session.get(AgentRun, run_id, with_for_update=True)
             if not case or case.tenant_id != tenant_id or not run:
                 raise RuntimeError("INVOICE_CONTEXT_NOT_FOUND")
+            # Tolerances, the tax reference rate, and the duplicate window are
+            # tenant policy, not constants. See app/domain/tenant_config.py.
+            configuration = await get_tenant_configuration(session, tenant_id)
             document_started_at = datetime.now(UTC)
             document_started = time.perf_counter()
             documents = (
@@ -1312,12 +1392,33 @@ async def run_invoice_analysis(envelope: dict[str, Any]) -> None:
                     bank_unverified = True
             if bank_mismatch:
                 reason_codes.append("UNVERIFIED_BANK_ACCOUNT_CHANGE")
+                # AP-007 expects two distinct findings. The first is a
+                # comparison; the second is a policy judgement, and it is the
+                # one that matters: a document asserting new bank details is
+                # not authority to change them (AP-001 §8). The vendor master
+                # is never updated from invoice content, whatever the invoice
+                # says about itself.
+                reason_codes.append("INVOICE_INSUFFICIENT_TO_CHANGE_BANK_DETAILS")
                 exceptions.append(
                     {
                         "exception_type": "UNVERIFIED_BANK_ACCOUNT_CHANGE",
                         "severity": "CRITICAL",
                         "confidence": 1.0,
-                        "mismatch_details": {"message": "Invoice bank blind index differs from vendor master."},
+                        "mismatch_details": {
+                            "message": (
+                                "The remittance account on this invoice differs "
+                                "from the verified vendor master account."
+                            ),
+                            "policy_position": (
+                                "An invoice is not sufficient authority to "
+                                "change bank details. The vendor master has "
+                                "not been modified. Independent verification "
+                                "with the supplier, through a channel not "
+                                "supplied by this document, is required before "
+                                "any payment is released."
+                            ),
+                            "vendor_master_updated": False,
+                        },
                         "affected_lines": [],
                     }
                 )
@@ -1334,7 +1435,10 @@ async def run_invoice_analysis(envelope: dict[str, Any]) -> None:
                     detector_version="1.0.0",
                     score=1.0,
                     threshold=1.0,
-                    reason_codes=["UNVERIFIED_BANK_ACCOUNT_CHANGE"],
+                    reason_codes=[
+                        "UNVERIFIED_BANK_ACCOUNT_CHANGE",
+                        "INVOICE_INSUFFICIENT_TO_CHANGE_BANK_DETAILS",
+                    ],
                     feature_snapshot={
                         "bank_blind_index_match": False,
                         "vendor_master_bank_available": bool(
@@ -1407,33 +1511,118 @@ async def run_invoice_analysis(envelope: dict[str, Any]) -> None:
                     )
                 )
 
-            tax_result = check_tax_mismatch(extracted_invoice, po_data)
-            if tax_result["mismatch"]:
-                reason_codes.append("TAX_MISMATCH")
+            # The reference rate is the tenant's configured one, not the
+            # purchase order's. Comparing an invoice against a PO only detects
+            # a disagreement between two documents the supplier influenced.
+            tax_result = evaluate_tax_rate(
+                configuration,
+                invoice_rate=_optional_decimal(extracted_invoice.get("tax_rate")),
+                jurisdiction=configuration.jurisdiction.home_country,
+                invoice_date_iso=(
+                    invoice_record.invoice_date.date().isoformat()
+                    if invoice_record.invoice_date
+                    else date.today().isoformat()
+                ),
+            )
+            reason_codes.extend(tax_result.reason_codes)
+            if tax_result.disposition == "MISMATCH":
                 exceptions.append(
                     {
                         "exception_type": "TAX_MISMATCH",
                         "severity": "HIGH",
                         "confidence": 1.0,
-                        "mismatch_details": {"message": tax_result["message"]},
+                        "mismatch_details": tax_result.as_dict(),
                         "affected_lines": [],
                     }
                 )
-            elif tax_result.get("unverified"):
-                reason_codes.append("TAX_POLICY_UNVERIFIED")
 
-            threshold_amount = Decimal("50.00")
-            threshold_pct = Decimal("5.00")
+            # An invoice whose lines do not reconcile to its stated total has
+            # almost certainly been mis-extracted, and every downstream
+            # comparison inherits that error.
+            arithmetic = check_arithmetic(
+                line_items=extracted_invoice["line_items"],
+                tax_amount=_decimal(extracted_invoice.get("tax_amount")),
+                stated_total=_decimal(extracted_invoice.get("total_amount")),
+            )
+            reason_codes.extend(arithmetic.reason_codes)
+            if not arithmetic.reconciles:
+                exceptions.append(
+                    {
+                        "exception_type": "INVOICE_ARITHMETIC_INCONSISTENT",
+                        "severity": "HIGH",
+                        "confidence": 1.0,
+                        "mismatch_details": arithmetic.as_dict(),
+                        "affected_lines": [],
+                    }
+                )
+            if not extracted_invoice.get("line_items_complete", True):
+                # Matching on the rows we happened to parse, while silently
+                # dropping one we did not, is how a quantity variance vanishes.
+                reason_codes.append("LINE_ITEM_EXTRACTION_INCOMPLETE")
+
+            currency_codes = check_currency_consistency(
+                invoice_currency=extracted_invoice.get("currency"),
+                po_currency=po_data.get("currency"),
+            )
+            reason_codes.extend(currency_codes)
+
+            # AP-001 §4 allows no automatic tolerance for invoicing above the
+            # accepted receipt, so each overrun is reported on its own terms
+            # rather than folded into a blended variance figure.
+            quantity_overruns = find_quantity_overruns(match_result["line_matches"])
+            if quantity_overruns:
+                reason_codes.append("QUANTITY_VARIANCE")
+                exceptions.append(
+                    {
+                        "exception_type": "QUANTITY_VARIANCE",
+                        "severity": "HIGH",
+                        "confidence": 1.0,
+                        "mismatch_details": {
+                            "message": " ".join(
+                                overrun.summary for overrun in quantity_overruns
+                            ),
+                            "lines": [
+                                {
+                                    "line_number": overrun.line_number,
+                                    "invoiced": str(overrun.invoiced),
+                                    "received": str(overrun.received),
+                                    "excess": str(overrun.excess),
+                                }
+                                for overrun in quantity_overruns
+                            ],
+                        },
+                        "affected_lines": [
+                            overrun.line_number for overrun in quantity_overruns
+                        ],
+                    }
+                )
+
             variance_amount = _decimal(match_result["overall_variance_amount"])
             variance_pct = _decimal(match_result["overall_variance_pct"])
+            tolerance = evaluate_price_tolerance(
+                configuration,
+                variance_amount=variance_amount,
+                variance_percent=variance_pct,
+            )
+            threshold_amount = tolerance.threshold_amount
+            threshold_pct = tolerance.threshold_percent
             within_tolerance = (
-                abs(variance_amount) <= threshold_amount
-                and abs(variance_pct) <= threshold_pct
+                tolerance.disposition == "WITHIN_TOLERANCE"
                 and not missing_po
                 and not missing_grn
             )
             if not within_tolerance:
                 reason_codes.append("EXCEEDS_TOLERANCE")
+            if tolerance.disposition == "EXCEEDS_TOLERANCE" and not quantity_overruns:
+                exceptions.append(
+                    {
+                        "exception_type": "PRICE_VARIANCE",
+                        "severity": "HIGH",
+                        "confidence": 1.0,
+                        "mismatch_details": tolerance.as_dict(),
+                        "affected_lines": [],
+                    }
+                )
             historical_amounts = [
                 float(value)
                 for value in (
@@ -1650,6 +1839,10 @@ async def run_invoice_analysis(envelope: dict[str, Any]) -> None:
                     case_id=case_id,
                     run_id=run_id,
                     source_type="DOCUMENT_PARSER",
+                    # The invoice is supplied by the party being paid. That is
+                    # not a reason to distrust it, but it is a reason never to
+                    # let it corroborate itself.
+                    provenance=Provenance.USER_UPLOADED,
                     source_id=str(invoice_document.document_id),
                     source_locator={"document_id": str(invoice_document.document_id)},
                     claim=(
@@ -1664,10 +1857,17 @@ async def run_invoice_analysis(envelope: dict[str, Any]) -> None:
                     case_id=case_id,
                     run_id=run_id,
                     source_type="THREE_WAY_MATCH",
+                    # A match against an uploaded PO/GRN is weaker evidence
+                    # than one against the ERP, and the case UI has to say so -
+                    # otherwise the product implies an ERP integration it does
+                    # not have.
+                    provenance=_match_provenance(po_source, grn_source),
                     source_id=reference_source,
                     source_locator={
                         "po_number": po_data.get("po_number"),
                         "line_count": len(match_result["line_matches"]),
+                        "po_source": po_source,
+                        "grn_source": grn_source,
                     },
                     claim=f"Three-way match disposition: {match_result['match_status']}.",
                     reason_code=match_result["match_status"],

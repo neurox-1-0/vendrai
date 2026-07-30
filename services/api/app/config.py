@@ -31,6 +31,12 @@ class Settings(BaseSettings):
     KEYCLOAK_ISSUER: str = "http://localhost:8080/realms/neurox"
     KEYCLOAK_JWKS_URL: str = ""
     KEYCLOAK_AUDIENCE: str = "neurox-api"
+    # Direct-grant credentials for the role-separated realm users the
+    # acceptance bootstrap provisions. Used by the bootstrap to authenticate as
+    # an administrator, and by the browser acceptance suite to log in as each
+    # role. Never used to authorise a request - the API still checks the token.
+    KEYCLOAK_E2E_CLIENT_SECRET: str = ""
+    KEYCLOAK_E2E_USER_PASSWORD: str = ""
     DEV_TENANT_ID: str = "00000000-0000-0000-0000-000000000001"
     DEV_USER_ID: str = "00000000-0000-0000-0000-000000000101"
 
@@ -40,6 +46,10 @@ class Settings(BaseSettings):
     QDRANT_API_KEY: str = ""
     RETRIEVAL_URL: str = "http://retrieval-api:8100"
     OPA_URL: str = "http://opa:8181"
+    # Third-party risk screening (adverse media, country risk). Distinct from
+    # sanctions screening, which runs against locally imported official lists.
+    RISK_SERVICE_URL: str = "http://mock-risk:8095"
+    RISK_SERVICE_TIMEOUT_SECONDS: float = 10.0
 
     STORAGE_BACKEND: Literal["local", "s3"] = "local"
     LOCAL_STORAGE_ROOT: Path = Path("../../.data/object-store")
@@ -108,6 +118,20 @@ class Settings(BaseSettings):
     SANCTIONS_EU_URL: str = ""
     ALERT_EVALUATION_INTERVAL_SECONDS: int = 900
     ALERT_TENANT_IDS: str = ""
+
+    # Reference data, policies, and case documents the bootstrap loads. Mounted
+    # read-only rather than baked into the image: it is several hundred
+    # megabytes of PDFs that only the bootstrap and the evaluation harness read.
+    CORPUS_ROOT: Path = Path("/srv/corpus")
+    # Base URL the bootstrap uses to drive the product's own API. Loading data
+    # through the public interface, rather than writing rows, means the
+    # bootstrap exercises authorization, idempotency, audit, and indexing on
+    # every run - it is the first integration test as well as a data load.
+    BOOTSTRAP_API_URL: str = "http://localhost:8000"
+    # Bounded wait for the retrieval worker to index a freshly published
+    # policy. Returning before indexing completes would report success while
+    # retrieval still answers nothing.
+    BOOTSTRAP_INDEXING_TIMEOUT_SECONDS: int = 180
 
     @model_validator(mode="after")
     def reject_unsafe_production_configuration(self) -> "Settings":

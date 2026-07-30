@@ -51,6 +51,24 @@ class User(Base, TimestampMixin):
     status: Mapped[str] = mapped_column(String(32), default="ACTIVE")
 
 
+class TenantConfigurationRecord(Base, TimestampMixin):
+    """Business thresholds for one tenant.
+
+    Stored as a document rather than columns because the shape is policy and
+    will grow; see app/domain/tenant_config.py for the schema it validates
+    against. An absent row means "use the defaults", which keeps a fresh
+    tenant working without a configuration step.
+    """
+
+    __tablename__ = "tenant_configurations"
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tenants.tenant_id"), primary_key=True
+    )
+    configuration: Mapped[dict[str, Any]] = mapped_column(JSONType, default=dict)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    updated_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.user_id"))
+
+
 class Vendor(Base, TimestampMixin):
     __tablename__ = "vendors"
     __table_args__ = (UniqueConstraint("tenant_id", "erp_vendor_id"),)
@@ -61,6 +79,9 @@ class Vendor(Base, TimestampMixin):
     tax_id_hash: Mapped[bytes | None] = mapped_column(LargeBinary)
     bank_account_hash: Mapped[bytes | None] = mapped_column(LargeBinary)
     registered_country: Mapped[str | None] = mapped_column(String(2))
+    # Feeds the email_domain_exact duplicate signal. Not sensitive - a domain
+    # is public - so it is stored in plaintext rather than as a blind index.
+    email_domain: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(32), default="PROPOSED")
     erp_vendor_id: Mapped[str | None] = mapped_column(Text)
 
@@ -438,6 +459,11 @@ class EvidenceItem(Base):
     case_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("cases.case_id", ondelete="CASCADE"), index=True)
     run_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("agent_runs.run_id"))
     source_type: Mapped[str] = mapped_column(String(50))
+    # Whether this evidence came from a party to the case, the system of
+    # record, an official list, the policy corpus, or the platform's own
+    # controls. See app/domain/provenance.py - the distinction is what stops
+    # an uploaded PO being presented as an authoritative ERP feed.
+    provenance: Mapped[str] = mapped_column(String(40), default="DERIVED_BY_SYSTEM")
     source_id: Mapped[str | None] = mapped_column(Text)
     source_locator: Mapped[dict[str, Any]] = mapped_column(JSONType, default=dict)
     claim: Mapped[str] = mapped_column(Text)

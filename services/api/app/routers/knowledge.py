@@ -3,10 +3,10 @@ from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import CurrentPrincipal
+from app.auth import CASE_READ_ROLES, CurrentPrincipal
 from app.database import get_db
 from app.domain.chunking import chunk_policy
 from app.domain.security import canonical_hash
@@ -16,6 +16,59 @@ from app.services.events import append_audit, enqueue_event
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 Db = Annotated[AsyncSession, Depends(get_db)]
+
+
+@router.get("/documents", response_model=list[PolicyResponse])
+async def list_policies(
+    db: Db,
+    principal: CurrentPrincipal,
+    policy_code: str | None = None,
+):
+    """List the tenant's policies and the state of their latest version.
+
+    Read access is broad on purpose: every staff role reviews cases against
+    cited policy, and a reviewer who cannot see which version is in force
+    cannot judge the citation.
+    """
+    principal.require_any(*CASE_READ_ROLES)
+    query = select(PolicyDocument).where(PolicyDocument.tenant_id == principal.tenant_id)
+    if policy_code:
+        query = query.where(PolicyDocument.policy_code == policy_code)
+    documents = (await db.execute(query.order_by(PolicyDocument.policy_code))).scalars().all()
+
+    responses: list[PolicyResponse] = []
+    for document in documents:
+        version = await db.scalar(
+            select(PolicyVersion)
+            .where(PolicyVersion.policy_document_id == document.policy_document_id)
+            .order_by(
+                # A published version is what a citation resolves against, so
+                # report that in preference to a newer draft.
+                (PolicyVersion.status == "PUBLISHED").desc(),
+                PolicyVersion.published_at.desc().nulls_last(),
+                PolicyVersion.created_at.desc(),
+            )
+            .limit(1)
+        )
+        if version is None:
+            continue
+        chunk_count = await db.scalar(
+            select(func.count())
+            .select_from(PolicyChunk)
+            .where(PolicyChunk.policy_version_id == version.policy_version_id)
+        )
+        responses.append(
+            PolicyResponse(
+                policy_document_id=document.policy_document_id,
+                policy_version_id=version.policy_version_id,
+                policy_code=document.policy_code,
+                title=document.title,
+                version=version.version,
+                status=version.status,
+                chunk_count=int(chunk_count or 0),
+            )
+        )
+    return responses
 
 
 @router.post("/documents", response_model=PolicyResponse, status_code=201)

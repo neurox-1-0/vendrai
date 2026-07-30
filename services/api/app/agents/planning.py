@@ -113,6 +113,53 @@ CAPABILITIES = (
         failure_policy="RETRYABLE",
     ),
     CapabilitySpec(
+        capability_id="document_completeness",
+        workflow_kind="supplier",
+        purpose=(
+            "Check the submitted documents against the required-document "
+            "matrix for this supplier's declared profile."
+        ),
+        prerequisites=["documents_ready"],
+        dependencies=["document_intelligence"],
+        mandatory_when_eligible=True,
+        failure_policy="BLOCKING",
+    ),
+    CapabilitySpec(
+        capability_id="supplier_controls",
+        workflow_kind="supplier",
+        purpose=(
+            "Apply cross-border, spend-band, data-residency, and certificate "
+            "validity controls using tenant configuration."
+        ),
+        prerequisites=["documents_ready"],
+        dependencies=["document_intelligence"],
+        mandatory_when_eligible=True,
+        failure_policy="BLOCKING",
+    ),
+    CapabilitySpec(
+        capability_id="injection_scan",
+        workflow_kind="supplier",
+        purpose=(
+            "Detect instructions in document content that attempt to override "
+            "workflow controls."
+        ),
+        prerequisites=["documents_ready"],
+        mandatory_when_eligible=True,
+        failure_policy="BLOCKING",
+    ),
+    CapabilitySpec(
+        capability_id="risk_screening",
+        workflow_kind="supplier",
+        purpose=(
+            "Screen the supplier for adverse media and country risk with the "
+            "external risk provider."
+        ),
+        prerequisites=["legal_name_available"],
+        dependencies=["document_intelligence"],
+        mandatory_when_eligible=True,
+        failure_policy="BLOCKING",
+    ),
+    CapabilitySpec(
         capability_id="document_intelligence",
         workflow_kind="invoice",
         purpose="Use locally extracted invoice fields and confidence.",

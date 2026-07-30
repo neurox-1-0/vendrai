@@ -10,6 +10,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import CASE_READ_ROLES, CurrentPrincipal
 from app.database import get_db
+from app.domain.audit_integrity import verify_chain
+from app.domain.provenance import (
+    PROVENANCE_LABELS,
+    Provenance,
+    is_authoritative,
+)
 from app.models import (
     ApprovalTask,
     AuditExport,
@@ -59,6 +65,14 @@ async def get_evidence(case_id: uuid.UUID, db: Db, principal: CurrentPrincipal):
             "evidence_item_id": str(item.evidence_item_id), "source_type": item.source_type,
             "source_id": item.source_id, "source_locator": item.source_locator, "claim": item.claim,
             "reason_code": item.reason_code, "confidence": item.confidence,
+            # Provenance travels with the evidence to the UI. Without it a
+            # reviewer cannot tell an uploaded purchase order from one read
+            # out of the ERP, and the two carry very different weight.
+            "provenance": item.provenance,
+            "provenance_label": PROVENANCE_LABELS.get(
+                Provenance(item.provenance), item.provenance
+            ),
+            "is_authoritative": is_authoritative(item.provenance),
         } for item in items],
         evidence_hash=task.evidence_hash if task else None,
     )
@@ -77,6 +91,37 @@ async def get_audit(case_id: uuid.UUID, db: Db, principal: CurrentPrincipal):
         "metadata": log.metadata_json, "previous_hash": log.previous_hash, "record_hash": log.record_hash,
         "created_at": log.created_at,
     } for log in logs]
+
+
+@router.get("/{case_id}/audit:verify")
+async def verify_audit_chain(
+    case_id: uuid.UUID,
+    db: Db,
+    principal: CurrentPrincipal,
+):
+    """Recompute the tenant's audit hash chain and report any break.
+
+    Writing a hash chain is not an integrity control; detecting a break in it
+    is. This is that detection path, and it deliberately verifies the whole
+    tenant chain rather than only this case's entries - a tamperer who deletes
+    a row breaks the link for every record after it, and a per-case view would
+    miss exactly that.
+    """
+    principal.require_any("auditor", "admin")
+    await _authorized_case(db, principal, case_id)
+    records = (
+        await db.execute(
+            select(AuditLog)
+            .where(AuditLog.tenant_id == principal.tenant_id)
+            .order_by(AuditLog.created_at, AuditLog.audit_log_id)
+        )
+    ).scalars().all()
+    result = verify_chain(list(records))
+    return {
+        **result.as_dict(),
+        "case_id": str(case_id),
+        "scope": "TENANT_CHAIN",
+    }
 
 
 def _export_response(record: AuditExport) -> AuditExportResponse:

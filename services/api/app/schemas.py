@@ -180,6 +180,11 @@ class AgentStepResponse(BaseModel):
     output_summary: dict[str, Any]
     error: dict[str, Any]
     latency_ms: int | None
+    # Whether latency_ms was measured from a committed step or projected from
+    # an in-flight one. A projected figure rendered like a measured one is a
+    # false claim about system behaviour, so the distinction is carried in the
+    # contract rather than left to the client to infer.
+    timing_source: Literal["MEASURED", "PROJECTED"] = "MEASURED"
     started_at: datetime
     completed_at: datetime | None
 
@@ -191,11 +196,21 @@ class RunGraphEdge(BaseModel):
 
 
 class RunTimingSummary(BaseModel):
+    """Aggregates computed only from committed steps.
+
+    In-flight steps are excluded rather than estimated. Including them would
+    make every figure here a moving projection wearing the label of a
+    measurement, and the numbers would silently shrink as steps completed.
+    ``projected_step_count`` tells the client how much is still outstanding so
+    it can say so honestly.
+    """
+
     total_elapsed_ms: int | None
     active_compute_ms: int
     critical_path_ms: int
     parallel_time_saved_ms: int
     human_waiting_ms: int | None = None
+    projected_step_count: int = 0
 
 
 class RunGraphResponse(BaseModel):

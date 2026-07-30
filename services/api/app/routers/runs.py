@@ -260,6 +260,10 @@ def _live_step_response(
                 if item.get("latency_ms") is not None
                 else None
             ),
+            # This step has not been committed by its worker yet. Its timing is
+            # a projection from an expiring cache, not a measurement, and the
+            # UI must present it as such.
+            timing_source="PROJECTED",
             started_at=started_at,
             completed_at=completed_at,
         )
@@ -327,9 +331,16 @@ async def _run_graph(
         and latest_node_ids[dependency] != str(node.step_id)
     ]
 
-    active_compute_ms = sum(node.latency_ms or 0 for node in nodes)
+    # Only committed steps contribute to the timing aggregates. A projected
+    # step's latency comes from an expiring cache entry the worker has not
+    # confirmed, so folding it in would publish an estimate under a measured
+    # label. See plans/03-phase-2-correctness.md item 2.6.
+    measured = [node for node in nodes if node.timing_source == "MEASURED"]
+    projected_step_count = len(nodes) - len(measured)
+
+    active_compute_ms = sum(node.latency_ms or 0 for node in measured)
     critical_by_name: dict[str, int] = {}
-    for node in nodes:
+    for node in measured:
         dependency_duration = max(
             (
                 critical_by_name.get(dependency, 0)
@@ -380,6 +391,7 @@ async def _run_graph(
                 active_compute_ms - critical_path_ms,
             ),
             human_waiting_ms=None,
+            projected_step_count=projected_step_count,
         ),
     )
 

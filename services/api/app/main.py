@@ -1,5 +1,7 @@
+import logging
 import time
 import uuid
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 
 from fastapi import Depends, FastAPI, Request
@@ -31,12 +33,27 @@ from app.routers import (
     work_queue,
 )
 from app.services.rate_limit import enforce_rate_limit
+from app.services.redis_support import verify_redis_version
+
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    # Fail fast on a Redis too old to serve the rate limiter rather than
+    # returning a misleading 503 on every request. See D-008.
+    version = await verify_redis_version()
+    if version:
+        logger.info("redis_version_ok: %s", version)
+    yield
+
 
 app = FastAPI(
     title="NeuroX Vendor Onboarding API",
     description="Tenant-isolated, evidence-driven vendor onboarding and human approval API.",
     version="1.0.0",
     docs_url="/docs" if settings.APP_ENV != "production" else None,
+    lifespan=lifespan,
 )
 
 app.add_middleware(

@@ -37,6 +37,40 @@ class ErpPolicyDenied(RuntimeError):
     pass
 
 
+class ErpEvidenceIncomplete(RuntimeError):
+    """Authoritative data needed for the write is absent.
+
+    Substituting a placeholder here would write a fabricated identity into the
+    vendor master, which then becomes reference data for future duplicate
+    detection - the fabrication propagates, invisibly. Retrying will not
+    conjure the missing field either, so this fails closed and non-retryably
+    with a reason code the UI and audit trail can show.
+
+    See plans/91-decisions.md ADR-003.
+    """
+
+    def __init__(self, reason_code: str) -> None:
+        super().__init__(reason_code)
+        self.reason_code = reason_code
+
+
+def _vendor_identity(payload: dict[str, Any]) -> dict[str, Any]:
+    """Validate the vendor identity before anything is written anywhere.
+
+    Runs before the ERP call, not after: a vendor created upstream and then
+    rejected locally leaves the two systems disagreeing about what exists.
+    """
+    legal_name = (payload.get("legal_name") or "").strip()
+    if not legal_name:
+        raise ErpEvidenceIncomplete("VENDOR_LEGAL_NAME_UNAVAILABLE")
+    return {
+        "legal_name": legal_name,
+        "normalized_legal_name": normalize_vendor_name(legal_name),
+        "registered_country": payload.get("registered_country"),
+        "email_domain": payload.get("email_domain"),
+    }
+
+
 @dataclass(frozen=True)
 class PreparedOperation:
     event_id: uuid.UUID
@@ -215,7 +249,14 @@ async def _authorize(prepared: PreparedOperation) -> None:
         raise ErpPolicyDenied(f"OPA_POLICY_DENIED:{reasons}")
 
 
+# Failures that retrying cannot fix. A missing legal name will still be
+# missing on the next attempt, and a denied policy will still deny.
+NON_RETRYABLE_FAILURES = (ErpPolicyDenied, ErpEvidenceIncomplete)
+
+
 def _error_code(exc: Exception) -> str:
+    if isinstance(exc, ErpEvidenceIncomplete):
+        return exc.reason_code
     if isinstance(exc, ErpPolicyDenied):
         return "OPA_POLICY_DENIED"
     message = str(exc)
@@ -232,7 +273,7 @@ async def _record_failure(
     prepared: PreparedOperation,
     exc: Exception,
 ) -> None:
-    policy_denied = isinstance(exc, ErpPolicyDenied)
+    blocked = isinstance(exc, NON_RETRYABLE_FAILURES)
     async with WorkerSession() as session, session.begin():
         await set_worker_tenant(session, str(prepared.tenant_id))
         if await session.get(
@@ -264,11 +305,11 @@ async def _record_failure(
                 )
             )
             return
-        operation.status = "BLOCKED" if policy_denied else "FAILED"
+        operation.status = "BLOCKED" if blocked else "FAILED"
         operation.last_error = f"{type(exc).__name__}: {exc}"[:2000]
         case.status = (
             CaseStatus.VERIFICATION_FAILED
-            if policy_denied
+            if blocked
             else CaseStatus.ERP_SYNC_FAILED
         )
         case.current_version += 1
@@ -278,13 +319,15 @@ async def _record_failure(
             case_id=prepared.case_id,
             event_type=(
                 "ERP_AUTHORIZATION_BLOCKED"
-                if policy_denied
+                if isinstance(exc, ErpPolicyDenied)
+                else "ERP_EVIDENCE_INCOMPLETE"
+                if isinstance(exc, ErpEvidenceIncomplete)
                 else "ERP_SYNC_FAILED"
             ),
             actor_type="SYSTEM",
             actor_id="erp-worker",
             payload={
-                "retryable": not policy_denied,
+                "retryable": not blocked,
                 "error_code": _error_code(exc),
             },
         )
@@ -306,6 +349,7 @@ async def sync_erp(envelope: dict) -> None:
         return
     try:
         await _authorize(prepared)
+        _vendor_identity(prepared.proposed_action.get("payload", {}))
         async with httpx.AsyncClient(timeout=20) as client:
             response = await client.post(
                 f"{settings.MOCK_ERP_URL}/v1/vendors",
@@ -356,18 +400,13 @@ async def sync_erp(envelope: dict) -> None:
         operation.status = "SUCCEEDED"
         operation.response_payload = result
         operation.provider_reference = result["erp_vendor_id"]
-        vendor_payload = prepared.proposed_action.get("payload", {})
+        identity = _vendor_identity(prepared.proposed_action.get("payload", {}))
         vendor = Vendor(
             tenant_id=prepared.tenant_id,
-            legal_name=(
-                vendor_payload.get("legal_name")
-                or "Human-approved vendor"
-            ),
-            normalized_legal_name=normalize_vendor_name(
-                vendor_payload.get("legal_name")
-                or "Human-approved vendor"
-            ),
-            registered_country=vendor_payload.get("registered_country"),
+            legal_name=identity["legal_name"],
+            normalized_legal_name=identity["normalized_legal_name"],
+            registered_country=identity["registered_country"],
+            email_domain=identity["email_domain"],
             status="ACTIVE",
             erp_vendor_id=result["erp_vendor_id"],
         )

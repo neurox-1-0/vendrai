@@ -11,13 +11,21 @@ from app.agents.planning import (
 )
 from app.agents.workflow import tenant_workflow, workflow_config
 from app.config import settings
+from app.domain.bank import (
+    evaluate_bank_consistency as evaluate_bank_consistency_evidence,
+)
 from app.domain.cases import CaseStatus, assert_transition
+from app.domain.clarification import build_questions
+from app.domain.documents import evaluate_completeness
 from app.domain.intelligence import (
     current_sanctions_datasets,
     sanctions_name_score,
     score_duplicate,
 )
+from app.domain.policy_query import build_supplier_policy_query
+from app.domain.provenance import provenance_for
 from app.domain.security import canonical_hash, normalize_vendor_name
+from app.domain.supplier_controls import evaluate_supplier_controls
 from app.llm_gateway import LLMProviderError
 from app.models import (
     AgentRun,
@@ -40,10 +48,46 @@ from app.models import (
 from app.services.events import append_audit, append_case_event, enqueue_event
 from app.services.live_progress import specialist_progress_callback
 from app.services.risk import upsert_risk_finding
+from app.services.risk_screening import screen_vendor
+from app.services.risk_screening import unavailable as risk_screening_unavailable
+from app.services.tenant_settings import get_tenant_configuration
 from app.workers.common import consume
 from app.workers.database import WorkerSession, set_worker_tenant
+from app.workers.supplier_profile import build_supplier_profile
 from langgraph.types import Command
 from sqlalchemy import select
+
+# The capability IDs this worker can actually execute.
+#
+# The registry is a contract: a capability that appears in a plan the operator
+# sees, but that nothing runs, tells the operator and the audit trail that a
+# check was performed when nothing happened. tests/test_capability_registry.py
+# asserts this set matches the registry exactly, so the two cannot drift.
+# See plans/91-decisions.md ADR-002.
+SUPPLIER_EXECUTORS = frozenset(
+    {
+        "document_intelligence",
+        "duplicate_detection",
+        "sanctions_screening",
+        "policy_retrieval",
+        "bank_consistency",
+        "document_completeness",
+        "supplier_controls",
+        "injection_scan",
+        "risk_screening",
+    }
+)
+
+
+# Which role owns each control review on a supplier case. Kept beside the
+# executor set so adding a review type without deciding who performs it is
+# visibly incomplete rather than silently defaulting to procurement.
+SUPPLIER_CONTROL_REVIEW_ROLES: dict[str, str] = {
+    "SANCTIONS_REVIEW": "compliance_approver",
+    "BANK_CHANGE_REVIEW": "finance_approver",
+    "PROCUREMENT_REVIEW": "procurement_approver",
+    "TAX_REVIEW": "finance_approver",
+}
 
 
 def lexical_score(query: str, content: str) -> float:
@@ -80,6 +124,7 @@ def duplicate_score(fields: dict[str, str], vendor: Vendor) -> tuple[float, dict
         candidate_tax_id_blind_index=vendor.tax_id_hash,
         candidate_bank_account_blind_index=vendor.bank_account_hash,
         candidate_country=vendor.registered_country,
+        candidate_email_domain=vendor.email_domain,
     )
     return result.score, result.signals
 
@@ -106,6 +151,192 @@ def evaluate_duplicate_candidates(
             }
         )
     return candidates
+
+
+def evaluate_bank_consistency(fields: dict[str, str]) -> dict:
+    """Check the submitted bank evidence against the entity being onboarded.
+
+    The supplier question is whether the bank account is consistent with the
+    registered entity and its country - there is no vendor-master row to
+    compare against yet, which is what distinguishes this from the invoice
+    version of the same capability.
+    """
+    # SWIFT is deliberately not consulted here. It is stored encrypted, and
+    # decrypting it would open a plaintext path through the worker for a
+    # fallback the corpus never needs - bank country is stated directly.
+    result = evaluate_bank_consistency_evidence(
+        legal_name=fields.get("legal_name_plain"),
+        beneficiary_name=fields.get("bank_beneficiary_name"),
+        registered_country=fields.get("registered_country"),
+        bank_country=fields.get("bank_country"),
+    )
+    return {
+        "disposition": result.disposition,
+        "signals": result.signals,
+        "reason_codes": result.reason_codes,
+        "missing_evidence": result.missing_evidence,
+    }
+
+
+def _local_control_step(
+    *,
+    session,
+    tenant_id: uuid.UUID,
+    run_id: uuid.UUID,
+    attempt: int,
+    node_name: str,
+    status: str,
+    route_reason: str,
+    output_summary: dict,
+    started_at: datetime,
+    started: float,
+) -> None:
+    session.add(
+        AgentStep(
+            tenant_id=tenant_id,
+            run_id=run_id,
+            node_name=node_name,
+            attempt=attempt,
+            status=status,
+            input_summary={
+                "route_reason": route_reason,
+                "dependencies": ["document_intelligence"],
+                "started_at": started_at.isoformat(),
+            },
+            output_summary={
+                **output_summary,
+                "completed_at": datetime.now(UTC).isoformat(),
+            },
+            error={},
+            latency_ms=round((time.perf_counter() - started) * 1000),
+        )
+    )
+
+
+def _run_local_controls(
+    *,
+    session,
+    tenant_id: uuid.UUID,
+    run_id: uuid.UUID,
+    attempt: int,
+    profile,
+    configuration,
+    fields: dict[str, str],
+    selected_capabilities: set[str],
+    route_reasons: dict[str, str],
+) -> dict:
+    """Run the deterministic controls and record a step for each.
+
+    Each control emits a real ``AgentStep`` with a measured latency, matching
+    the shape of every other step, so a capability the operator sees in the
+    plan corresponds to something that visibly ran.
+    """
+    spend_elevated = (
+        profile.annual_spend is not None
+        and configuration.spend.is_elevated(profile.annual_spend)
+    )
+
+    completeness_started_at = datetime.now(UTC)
+    completeness_started = time.perf_counter()
+    completeness = evaluate_completeness(
+        profile.present_types,
+        data_access_declared=bool(profile.data_access_declared),
+        data_stored_outside_country=bool(profile.data_stored_outside_country),
+        spend_above_threshold=spend_elevated,
+        unclassified_count=profile.unclassified_count,
+    )
+    if "document_completeness" in selected_capabilities:
+        _local_control_step(
+            session=session,
+            tenant_id=tenant_id,
+            run_id=run_id,
+            attempt=attempt,
+            node_name="document_completeness",
+            status="SUCCESS" if completeness.disposition == "COMPLETE" else "PARTIAL",
+            route_reason=route_reasons.get(
+                "document_completeness",
+                "The submitted documents must satisfy the required-document matrix.",
+            ),
+            output_summary={
+                "disposition": completeness.disposition,
+                "requirements_version": completeness.requirements_version,
+                "present": [str(item) for item in completeness.present],
+                "missing": [
+                    {"document_type": str(item.document_type), "reason": item.reason}
+                    for item in completeness.missing
+                ],
+                "unclassified_count": completeness.unclassified_count,
+                "applied_conditions": completeness.applied_conditions,
+            },
+            started_at=completeness_started_at,
+            started=completeness_started,
+        )
+
+    controls_started_at = datetime.now(UTC)
+    controls_started = time.perf_counter()
+    control_result = evaluate_supplier_controls(
+        configuration,
+        registered_country=fields.get("registered_country"),
+        bank_country=fields.get("bank_country"),
+        annual_spend=profile.annual_spend,
+        spend_currency=profile.spend_currency,
+        data_access_declared=profile.data_access_declared,
+        data_stored_outside_country=profile.data_stored_outside_country,
+        dpa_available=profile.dpa_available,
+        dpa_document_present=profile.dpa_document_present,
+        insurance_valid_from=profile.insurance_valid_from,
+        insurance_valid_to=profile.insurance_valid_to,
+        tax_certificate_valid_to=profile.tax_certificate_valid_to,
+        as_of=datetime.now(UTC).date(),
+    )
+    if "supplier_controls" in selected_capabilities:
+        _local_control_step(
+            session=session,
+            tenant_id=tenant_id,
+            run_id=run_id,
+            attempt=attempt,
+            node_name="supplier_controls",
+            status=(
+                "SUCCESS"
+                if control_result.disposition == "CLEAR"
+                else "PARTIAL"
+            ),
+            route_reason=route_reasons.get(
+                "supplier_controls",
+                "Cross-border, spend, residency, and certificate controls apply to every supplier.",
+            ),
+            output_summary=control_result.as_dict(),
+            started_at=controls_started_at,
+            started=controls_started,
+        )
+
+    if "injection_scan" in selected_capabilities:
+        injection_started_at = datetime.now(UTC)
+        injection_started = time.perf_counter()
+        _local_control_step(
+            session=session,
+            tenant_id=tenant_id,
+            run_id=run_id,
+            attempt=attempt,
+            node_name="injection_scan",
+            status="PARTIAL" if profile.injection.detected else "SUCCESS",
+            route_reason=route_reasons.get(
+                "injection_scan",
+                "Document content is untrusted and is scanned before any model call.",
+            ),
+            # The full evidence, including matched spans, is written to the
+            # evidence trail for a human. This step summary carries only the
+            # shape of what was found.
+            output_summary=profile.injection.as_model_safe_summary(),
+            started_at=injection_started_at,
+            started=injection_started,
+        )
+
+    return {
+        "completeness": completeness,
+        "controls": control_result,
+        "spend_elevated": spend_elevated,
+    }
 
 
 def evaluate_sanctions_candidates(
@@ -207,6 +438,10 @@ async def run_analysis(envelope: dict) -> None:
             legal_field = field_sources.get("legal_name")
             legal_name = legal_field.field_value_masked if legal_field else None
             fields["legal_name_normalized"] = normalize_vendor_name(legal_name or "")
+            # The legal name is not sensitive, so the masked value is the real
+            # one. bank_consistency needs it unnormalized to compare against
+            # the beneficiary as written.
+            fields["legal_name_plain"] = legal_name or ""
             document_completed_at = datetime.now(UTC)
             session.add(
                 AgentStep(
@@ -241,6 +476,13 @@ async def run_analysis(envelope: dict) -> None:
                     ),
                 )
             )
+
+            # Document classification, questionnaire answers, certificate
+            # dates, and the injection scan all come from one pass over the
+            # case's documents, keeping each fact tied to the document that
+            # stated it.
+            profile = await build_supplier_profile(session, tenant_id, case_id)
+            configuration = await get_tenant_configuration(session, tenant_id)
 
             observable_facts = {
                 "documents_ready": True,
@@ -348,7 +590,49 @@ async def run_analysis(envelope: dict) -> None:
                 select(SanctionsEntityRecord).where(SanctionsEntityRecord.dataset_id.in_(dataset_ids))
             )).scalars().all() if dataset_ids else []
 
-            policy_query = "new vendor onboarding required documents bank details sanctions screening human approval"
+            # Local, deterministic controls run first and synchronously. They
+            # are pure functions over already-extracted evidence, so there is
+            # nothing to parallelise - and the policy query is composed from
+            # their findings, which means they must be finished before
+            # retrieval starts. See app/domain/policy_query.py.
+            local_controls = _run_local_controls(
+                session=session,
+                tenant_id=tenant_id,
+                run_id=run_id,
+                attempt=run.state_version,
+                profile=profile,
+                configuration=configuration,
+                fields=fields,
+                selected_capabilities=selected_capabilities,
+                route_reasons=(
+                    {
+                        item.capability_id: item.rationale
+                        for item in plan.output.selected_capabilities
+                    }
+                    if plan
+                    else {}
+                ),
+            )
+            completeness = local_controls["completeness"]
+            control_result = local_controls["controls"]
+            injection = profile.injection
+
+            policy_query_plan = build_supplier_policy_query(
+                reason_codes=[
+                    *completeness.reason_codes,
+                    *control_result.reason_codes,
+                    *injection.reason_codes,
+                ],
+                registered_country=fields.get("registered_country"),
+                bank_country=fields.get("bank_country"),
+                data_access_declared=bool(profile.data_access_declared),
+                spend_elevated=(
+                    profile.annual_spend is not None
+                    and configuration.spend.is_elevated(profile.annual_spend)
+                ),
+            )
+            policy_query = policy_query_plan.text
+
             selected_operations = {}
             if "duplicate_detection" in selected_capabilities:
                 selected_operations["duplicate_detection"] = (
@@ -373,6 +657,15 @@ async def run_analysis(envelope: dict) -> None:
                 selected_operations["policy_retrieval"] = (
                     retrieve_policy(tenant_id, policy_query)
                 )
+            if "bank_consistency" in selected_capabilities:
+                selected_operations["bank_consistency"] = asyncio.to_thread(
+                    evaluate_bank_consistency,
+                    fields,
+                )
+            if "risk_screening" in selected_capabilities:
+                selected_operations["risk_screening"] = screen_vendor(
+                    fields.get("legal_name_plain", "")
+                )
             route_reasons = {
                 item.capability_id: item.rationale
                 for item in plan.output.selected_capabilities
@@ -384,6 +677,8 @@ async def run_analysis(envelope: dict) -> None:
                     in {
                         "duplicate_detection",
                         "sanctions_screening",
+                        "bank_consistency",
+                        "risk_screening",
                     }
                     else ["goal_planner"]
                 )
@@ -424,6 +719,22 @@ async def run_analysis(envelope: dict) -> None:
                 and policy_result["status"] == "SUCCESS"
                 else ([], "POLICY_RETRIEVAL_UNAVAILABLE")
             )
+            bank_result = specialist_results.get("bank_consistency")
+            bank_evidence = (
+                bank_result["result"]
+                if bank_result and bank_result["status"] == "SUCCESS"
+                else None
+            )
+            screening_result = specialist_results.get("risk_screening")
+            screening = (
+                screening_result["result"]
+                if screening_result and screening_result["status"] == "SUCCESS"
+                # A raised exception is itself an outage. Fail closed rather
+                # than letting an absent result read as a clean one.
+                else risk_screening_unavailable("RISK_SERVICE_CALL_FAILED")
+                if screening_result
+                else None
+            )
 
             specialist_summaries = {
                 "duplicate_detection": {
@@ -447,6 +758,22 @@ async def run_analysis(envelope: dict) -> None:
                     ),
                     "error_code": policy_error,
                 },
+                "bank_consistency": {
+                    "disposition": (
+                        bank_evidence["disposition"]
+                        if bank_evidence
+                        else "UNVERIFIED"
+                    ),
+                    "signals": bank_evidence["signals"] if bank_evidence else {},
+                    "missing_evidence": (
+                        bank_evidence["missing_evidence"] if bank_evidence else []
+                    ),
+                },
+                "risk_screening": (
+                    screening.as_dict()
+                    if screening
+                    else {"disposition": "NOT_SELECTED"}
+                ),
             }
             for capability_id, result in specialist_results.items():
                 summary = specialist_summaries[capability_id]
@@ -456,12 +783,25 @@ async def run_analysis(envelope: dict) -> None:
                 ) or (
                     capability_id == "policy_retrieval"
                     and not policy_items
+                ) or (
+                    # An unavailable risk provider is a blocked check, not a
+                    # passing one. Making that visible on the step is the whole
+                    # reason the fixture ships an UNAVAILABLE vendor.
+                    capability_id == "risk_screening"
+                    and screening is not None
+                    and screening.disposition == "UNAVAILABLE"
                 )
                 status = (
                     "FAILED"
                     if result["status"] == "FAILED"
                     else "BLOCKED"
                     if blocked
+                    else "PARTIAL"
+                    # Absent bank evidence is not a clean bank check. Reporting
+                    # SUCCESS here would tell the operator the account was
+                    # verified when nothing was compared.
+                    if capability_id == "bank_consistency"
+                    and summary["disposition"] == "UNVERIFIED"
                     else "SUCCESS"
                 )
                 session.add(
@@ -547,6 +887,142 @@ async def run_analysis(envelope: dict) -> None:
                         }
                     ],
                 )
+            if bank_evidence and bank_evidence["disposition"] == "MISMATCH":
+                await upsert_risk_finding(
+                    session,
+                    tenant_id=tenant_id,
+                    case_id=case_id,
+                    subject_type="CASE",
+                    subject_id=str(case_id),
+                    finding_type="BANK_EVIDENCE_INCONSISTENT",
+                    severity="HIGH",
+                    mode="ACTIVE",
+                    detector_key="supplier_bank_consistency",
+                    detector_version="1.0.0",
+                    score=1.0,
+                    threshold=1.0,
+                    reason_codes=bank_evidence["reason_codes"],
+                    feature_snapshot=bank_evidence["signals"],
+                    explanation={
+                        "summary": (
+                            "The submitted bank evidence does not agree with "
+                            "the entity being onboarded. A payment instruction "
+                            "that names a different party, or a bank in a "
+                            "different jurisdiction to the registered entity, "
+                            "requires independent verification before any "
+                            "vendor record is created."
+                        )
+                    },
+                    evidence_refs=[
+                        {
+                            "source_type": "EXTRACTED_FIELD",
+                            "field_name": name,
+                        }
+                        for name in (
+                            "legal_name",
+                            "bank_beneficiary_name",
+                            "registered_country",
+                            "bank_country",
+                        )
+                        if name in field_sources
+                    ],
+                )
+            if injection.detected:
+                await upsert_risk_finding(
+                    session,
+                    tenant_id=tenant_id,
+                    case_id=case_id,
+                    subject_type="CASE",
+                    subject_id=str(case_id),
+                    finding_type="UNTRUSTED_DOCUMENT_INSTRUCTION",
+                    severity="HIGH",
+                    mode="ACTIVE",
+                    detector_key="deterministic_injection_scan",
+                    detector_version="1.0.0",
+                    score=1.0,
+                    threshold=1.0,
+                    reason_codes=injection.reason_codes,
+                    feature_snapshot={"pattern_ids": injection.pattern_ids},
+                    explanation={
+                        "summary": (
+                            "A submitted document contains text addressed to "
+                            "the processing system, attempting to bypass "
+                            "approval requirements. The instruction was "
+                            "detected before any model call and was not acted "
+                            "on. The document may still be legitimate, so the "
+                            "case is routed for clarification rather than "
+                            "rejected."
+                        )
+                    },
+                    evidence_refs=[
+                        {
+                            "source_type": "DOCUMENT_PAGE",
+                            "page": match.page,
+                            "pattern_id": match.pattern_id,
+                        }
+                        for match in injection.matches
+                    ],
+                )
+            for finding in control_result.findings:
+                if not finding.needs_attention or not finding.reason_code:
+                    continue
+                await upsert_risk_finding(
+                    session,
+                    tenant_id=tenant_id,
+                    case_id=case_id,
+                    subject_type="CASE",
+                    subject_id=str(case_id),
+                    finding_type=finding.reason_code,
+                    severity="HIGH",
+                    mode="ACTIVE",
+                    detector_key=f"supplier_control:{finding.control}",
+                    detector_version="1.0.0",
+                    score=1.0,
+                    threshold=1.0,
+                    reason_codes=[finding.reason_code],
+                    feature_snapshot=dict(finding.evidence),
+                    explanation={"summary": finding.summary},
+                    evidence_refs=[
+                        {"source_type": "EXTRACTED_FIELD", "control": finding.control}
+                    ],
+                )
+            if screening and screening.disposition != "CLEAR":
+                await upsert_risk_finding(
+                    session,
+                    tenant_id=tenant_id,
+                    case_id=case_id,
+                    subject_type="CASE",
+                    subject_id=str(case_id),
+                    finding_type=(
+                        "RISK_SERVICE_UNAVAILABLE"
+                        if screening.disposition == "UNAVAILABLE"
+                        else "EXTERNAL_RISK_MATCH"
+                    ),
+                    severity="HIGH",
+                    mode="ACTIVE",
+                    detector_key="external_risk_screening",
+                    detector_version="1.0.0",
+                    score=1.0,
+                    threshold=1.0,
+                    reason_codes=screening.reason_codes,
+                    feature_snapshot=screening.as_dict(),
+                    explanation={
+                        "summary": (
+                            "The external risk provider did not return a "
+                            "usable result, so screening is incomplete. An "
+                            "unavailable check is not a passed check."
+                            if screening.disposition == "UNAVAILABLE"
+                            else "External screening returned a signal that "
+                            "requires human review before onboarding."
+                        )
+                    },
+                    evidence_refs=[
+                        {
+                            "source_type": "RISK_SERVICE",
+                            "checked_at": screening.checked_at,
+                        }
+                    ],
+                )
             session.add(RiskCheck(
                 tenant_id=tenant_id, case_id=case_id, provider="LOCAL_OFFICIAL_LISTS",
                 dataset_versions={item.source: item.version for item in datasets},
@@ -562,8 +1038,21 @@ async def run_analysis(envelope: dict) -> None:
             unresolved = []
             if not legal_name:
                 unresolved.append("legal_name")
-            critical_unverified = [field.field_name for field in fields_rows if field.field_name in {"tax_id", "bank_account"} and not field.human_verified and (field.confidence or 0) < 0.90]
-            unresolved.extend(critical_unverified)
+            low_confidence_fields = [
+                (field.field_name, field.source_page)
+                for field in fields_rows
+                if field.field_name in {"tax_id", "bank_account"}
+                and not field.human_verified
+                and (field.confidence or 0) < 0.90
+            ]
+            unresolved.extend(name for name, _ in low_confidence_fields)
+            # A missing required document is deliberately *not* added to
+            # unresolved. Doing so would force every such case to clarification
+            # and hide the risk findings underneath - VO-003 omits its tax
+            # certificate and still expects an enhanced review driven by its
+            # cross-border, residency, and expiry findings. The missing
+            # document contributes a reason code and a clarification question,
+            # and the routing rules below decide what wins.
             blockers = []
             if (
                 duplicate_result
@@ -581,18 +1070,87 @@ async def run_analysis(envelope: dict) -> None:
                 reason_codes.append("POSSIBLE_DUPLICATE")
             if risk_disposition == "POSSIBLE_MATCH":
                 reason_codes.append("SANCTIONS_REVIEW_REQUIRED")
+            if bank_evidence:
+                # A mismatch is a finding for a human, not a workflow failure -
+                # which is why the registry declares this capability RETRYABLE
+                # for suppliers and BLOCKING for invoices.
+                reason_codes.extend(bank_evidence["reason_codes"])
+            reason_codes.extend(completeness.reason_codes)
+            reason_codes.extend(control_result.reason_codes)
+            reason_codes.extend(injection.reason_codes)
+            if screening:
+                reason_codes.extend(screening.reason_codes)
+            reason_codes = list(dict.fromkeys(reason_codes))
+
+            control_evidence = {
+                finding.reason_code: finding.evidence
+                for finding in control_result.findings
+                if finding.reason_code
+            }
+            clarification_questions = build_questions(
+                completeness=completeness,
+                control_reason_codes=[
+                    *control_result.reason_codes,
+                    *(bank_evidence["reason_codes"] if bank_evidence else []),
+                    *injection.reason_codes,
+                    *(screening.reason_codes if screening else []),
+                ],
+                control_evidence={
+                    **control_evidence,
+                    **(
+                        {
+                            code: bank_evidence["signals"]
+                            for code in bank_evidence["reason_codes"]
+                        }
+                        if bank_evidence
+                        else {}
+                    ),
+                },
+                low_confidence_fields=low_confidence_fields,
+                missing_fields=["legal_name"] if not legal_name else [],
+            )
+
             recommendation = "REQUEST_INFORMATION" if unresolved else "REVIEW_REQUIRED" if reason_codes else "CREATE_VENDOR"
             packet = {
                 "case_id": str(case_id), "run_id": str(run_id), "recommendation": recommendation,
-                "reason_codes": reason_codes, "vendor": {"legal_name": legal_name, "registered_country": fields.get("registered_country")},
+                "reason_codes": reason_codes,
+                "vendor": {
+                    "legal_name": legal_name,
+                    "registered_country": fields.get("registered_country"),
+                    "email_domain": fields.get("email_domain"),
+                },
                 "duplicate_candidates": duplicate_items, "risk": {"disposition": risk_disposition, "candidates": risk_candidates},
                 "policy_clauses": policy_items, "unresolved_items": sorted(set(unresolved)),
+                "bank_consistency": bank_evidence,
+                "document_completeness": {
+                    "disposition": completeness.disposition,
+                    "requirements_version": completeness.requirements_version,
+                    "missing": [
+                        {
+                            "document_type": str(item.document_type),
+                            "label": item.label,
+                            "reason": item.reason,
+                        }
+                        for item in completeness.missing
+                    ],
+                },
+                "supplier_controls": control_result.as_dict(),
+                # The full injection evidence, matched spans included, is for
+                # the human reviewer. It never enters a model payload.
+                "untrusted_instructions": injection.as_evidence(),
+                "risk_screening": screening.as_dict() if screening else None,
+                "policy_query": policy_query_plan.as_dict(),
+                "supplier_profile": profile.as_dict(),
+                "clarification_questions": [
+                    question.as_dict() for question in clarification_questions
+                ],
             }
             evidence_hash = canonical_hash(packet)
             evidence_rows: list[EvidenceItem] = []
             for item in policy_items:
                 evidence = EvidenceItem(
                     tenant_id=tenant_id, case_id=case_id, run_id=run_id, source_type="POLICY",
+                    provenance=provenance_for("POLICY"),
                     source_id=f"{item['policy_code']}:{item['version']}:{item['clause_id']}",
                     source_locator={"effective_date": item["effective_date"]}, claim=item["content"],
                     reason_code="POLICY_CLAUSE", confidence=item.get("rerank_score"),
@@ -602,8 +1160,68 @@ async def run_analysis(envelope: dict) -> None:
             for item in duplicate_items:
                 evidence = EvidenceItem(
                     tenant_id=tenant_id, case_id=case_id, run_id=run_id, source_type="VENDOR_MASTER",
+                    provenance=provenance_for("VENDOR_MASTER"),
                     source_id=item["vendor_id"], source_locator={"signals": item["signals"]},
                     claim=f"Potential duplicate: {item['name']}", reason_code="DUPLICATE_SCORE", confidence=item["score"],
+                )
+                evidence_rows.append(evidence)
+                session.add(evidence)
+            if bank_evidence:
+                evidence = EvidenceItem(
+                    tenant_id=tenant_id, case_id=case_id, run_id=run_id,
+                    source_type="EXTRACTED_FIELD",
+                    # The bank evidence comes from documents the supplier
+                    # supplied, so it is self-asserted. Recording that is what
+                    # keeps a beneficiary mismatch a question for a human
+                    # rather than something the system resolves on its own.
+                    provenance=provenance_for("EXTRACTED_FIELD"),
+                    source_id="bank_consistency",
+                    source_locator={"signals": bank_evidence["signals"]},
+                    claim=(
+                        "Bank evidence disposition: "
+                        f"{bank_evidence['disposition']}"
+                    ),
+                    reason_code="BANK_CONSISTENCY",
+                    confidence=None,
+                )
+                evidence_rows.append(evidence)
+                session.add(evidence)
+            if screening:
+                evidence = EvidenceItem(
+                    tenant_id=tenant_id, case_id=case_id, run_id=run_id,
+                    source_type="RISK_SERVICE",
+                    provenance=provenance_for("RISK_SERVICE"),
+                    source_id=screening.matched_name,
+                    source_locator={"checked_at": screening.checked_at},
+                    claim=(
+                        f"External risk screening: {screening.disposition}"
+                        + (
+                            f" (adverse media: {screening.adverse_media})"
+                            if screening.adverse_media
+                            else ""
+                        )
+                    ),
+                    reason_code="EXTERNAL_RISK_SCREENING",
+                    confidence=None,
+                )
+                evidence_rows.append(evidence)
+                session.add(evidence)
+            if injection.detected:
+                evidence = EvidenceItem(
+                    tenant_id=tenant_id, case_id=case_id, run_id=run_id,
+                    source_type="DOCUMENT_PAGE",
+                    provenance=provenance_for("DOCUMENT_PAGE"),
+                    source_id="injection_scan",
+                    # The matched spans live here, for the reviewer. This
+                    # record is never included in a model payload.
+                    source_locator=injection.as_evidence(),
+                    claim=(
+                        "A submitted document contains an instruction "
+                        "attempting to override workflow controls. It was "
+                        "detected before any model call and was not acted on."
+                    ),
+                    reason_code="UNTRUSTED_DOCUMENT_INSTRUCTION",
+                    confidence=None,
                 )
                 evidence_rows.append(evidence)
                 session.add(evidence)
@@ -622,6 +1240,22 @@ async def run_analysis(envelope: dict) -> None:
                     ),
                     "sanctions": risk_disposition,
                     "policy": "SUFFICIENT" if policy_items else "INSUFFICIENT",
+                    "bank_consistency": (
+                        bank_evidence["disposition"]
+                        if bank_evidence
+                        else "NOT_SELECTED"
+                    ),
+                    "document_completeness": completeness.disposition,
+                    "supplier_controls": control_result.disposition,
+                    "external_risk": (
+                        screening.disposition if screening else "NOT_SELECTED"
+                    ),
+                    # Only the shape reaches the model, never the matched text.
+                    # Handing an injection attempt to the model "for context"
+                    # gives it exactly the delivery it was after.
+                    "untrusted_document_instruction": (
+                        injection.as_model_safe_summary()
+                    ),
                 },
                 "evidence": [
                     {
@@ -652,7 +1286,11 @@ async def run_analysis(envelope: dict) -> None:
                 "human_gate_kind": (
                     "CLARIFICATION" if unresolved else "APPROVAL"
                 ),
-                "required_reviews": [
+                # De-duplicated: the workflow consumes this list by index, so
+                # two entries of the same type would demand the same review
+                # twice. Sanctions and the external risk provider can both
+                # raise a compliance review, and one is enough.
+                "required_reviews": list(dict.fromkeys(
                     review_type
                     for review_type, required in (
                         (
@@ -666,9 +1304,31 @@ async def run_analysis(envelope: dict) -> None:
                             "SANCTIONS_REVIEW",
                             risk_disposition == "POSSIBLE_MATCH",
                         ),
+                        (
+                            "BANK_CHANGE_REVIEW",
+                            bool(
+                                bank_evidence
+                                and bank_evidence["disposition"] == "MISMATCH"
+                            ),
+                        ),
+                        (
+                            # Cross-border banking, elevated spend, data
+                            # residency, an unavailable DPA, an expired
+                            # certificate, or a missing required document.
+                            # Any of these makes the case an enhanced review.
+                            "PROCUREMENT_REVIEW",
+                            bool(
+                                control_result.reason_codes
+                                or completeness.missing
+                            ),
+                        ),
+                        (
+                            "SANCTIONS_REVIEW",
+                            bool(screening and screening.disposition != "CLEAR"),
+                        ),
                     )
                     if required
-                ],
+                )),
                 "completed_reviews": [],
                 "deterministic_packet": graph_packet,
                 "current_stage": "deterministic_checks_complete",
@@ -750,7 +1410,25 @@ async def run_analysis(envelope: dict) -> None:
                 case.status = CaseStatus.NEEDS_CLARIFICATION
                 task = ClarificationTask(
                     tenant_id=tenant_id, case_id=case_id, run_id=run_id,
-                    questions=[{"field": item, "question": f"Please confirm or provide {item.replace('_', ' ')}."} for item in sorted(set(unresolved))],
+                    # Questions come from the deterministic findings above, so
+                    # each one names the specific document, field, or control
+                    # that produced it. A generic "please confirm or provide
+                    # legal name" is not actionable for a case blocked on an
+                    # expired certificate or a cross-border bank account.
+                    questions=[
+                        question.as_dict() for question in clarification_questions
+                    ]
+                    or [
+                        {
+                            "field": item,
+                            "question": (
+                                f"Please confirm or provide {item.replace('_', ' ')}."
+                            ),
+                            "reason_code": "FIELD_NOT_STATED",
+                            "locator": {},
+                        }
+                        for item in sorted(set(unresolved))
+                    ],
                 )
                 session.add(task)
                 await session.flush()
@@ -776,9 +1454,9 @@ async def run_analysis(envelope: dict) -> None:
                 if task_type == "DUPLICATE_REVIEW":
                     case.status = CaseStatus.DUPLICATE_REVIEW
                     assigned_role = "procurement_approver"
-                elif task_type == "SANCTIONS_REVIEW":
+                elif task_type in SUPPLIER_CONTROL_REVIEW_ROLES:
                     case.status = CaseStatus.RISK_REVIEW
-                    assigned_role = "compliance_approver"
+                    assigned_role = SUPPLIER_CONTROL_REVIEW_ROLES[task_type]
                 else:
                     case.status = CaseStatus.APPROVAL_PENDING
                     assigned_role = "procurement_approver"
