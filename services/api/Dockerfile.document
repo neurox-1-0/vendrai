@@ -1,11 +1,22 @@
+# syntax=docker/dockerfile:1.7
 FROM python:3.12.13-slim-bookworm AS runtime
-ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 EASYOCR_MODULE_PATH=/opt/easyocr
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 EASYOCR_MODULE_PATH=/opt/easyocr
 WORKDIR /srv/api
-RUN apt-get update && apt-get install --yes --no-install-recommends tesseract-ocr libgl1 libglib2.0-0 && rm -rf /var/lib/apt/lists/*
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    apt-get update \
+    && apt-get install --yes --no-install-recommends tesseract-ocr libgl1 libglib2.0-0
 RUN addgroup --system neurox && adduser --system --ingroup neurox neurox
 COPY services/api/requirements.txt services/api/requirements-document.txt ./
-RUN pip install --requirement requirements.txt --requirement requirements-document.txt
-RUN python -c "import easyocr; easyocr.Reader(['en'], gpu=False, model_storage_directory='/opt/easyocr', download_enabled=True)"
+# This layer pulls PyTorch. Without a cache mount every rebuild re-downloads
+# roughly 2 GB of wheels, which is most of the clean-build time.
+RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
+    pip install --retries 5 --timeout 60 \
+        --requirement requirements.txt --requirement requirements-document.txt
+# Model weights get their own layer, above the application code, so editing a
+# worker does not re-download them.
+COPY services/api/scripts/download_models.py ./scripts/download_models.py
+RUN python -m scripts.download_models document
 COPY services/api ./
 RUN chown -R neurox:neurox /srv/api
 USER neurox

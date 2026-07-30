@@ -30,6 +30,7 @@ x-api-image: &api-image
     SMTP_HOST: mailpit
     SMTP_PORT: "1025"
     MOCK_ERP_URL: http://mock-erp:8090
+    RISK_SERVICE_URL: http://mock-risk:8095
     KEYCLOAK_ISSUER: http://localhost:8080/realms/neurox
     KEYCLOAK_JWKS_URL: http://keycloak:8080/realms/neurox/protocol/openid-connect/certs
     OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
@@ -40,9 +41,13 @@ x-api-image: &api-image
     SANCTIONS_OFAC_URL: ${SANCTIONS_OFAC_URL:-https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/SDN.XML}
     SANCTIONS_UN_URL: ${SANCTIONS_UN_URL:-https://scsanctions.un.org/resources/xml/en/consolidated.xml}
     SANCTIONS_EU_URL: ${SANCTIONS_EU_URL:-}
+    CORPUS_ROOT: /srv/corpus
   networks: [app, data]
   volumes:
     - object_data:/var/lib/neurox/objects
+    # Reference data, policies, and case documents for `stack.sh bootstrap`.
+    # Read-only, and mounted rather than baked in so image builds stay small.
+    - ./Vendrai_Procurement_Document_Corpus_v2:/srv/corpus:ro
 
 x-worker-depends: &worker-depends
   postgres:
@@ -329,6 +334,8 @@ services:
       <<: *worker-depends
       retrieval-api:
         condition: service_healthy
+      mock-risk:
+        condition: service_healthy
 
   invoice-worker:
     <<: *api-image
@@ -398,6 +405,26 @@ services:
         condition: service_healthy
       opa:
         condition: service_started
+
+  mock-risk:
+    build:
+      context: .
+      dockerfile: services/mock_risk/Dockerfile
+    image: neurox-mock-risk:local
+    restart: unless-stopped
+    environment:
+      RISK_RESULTS_PATH: /srv/risk/seed/mock_risk_api_results.json
+      # Set to true to exercise the provider-outage path without stopping the
+      # container. See services/mock_risk/app.py.
+      RISK_FORCE_UNAVAILABLE: ${RISK_FORCE_UNAVAILABLE:-false}
+    volumes:
+      - ./Vendrai_Procurement_Document_Corpus_v2/ground_truth:/srv/risk/seed:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8095/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [app]
 
   mock-erp:
     build:

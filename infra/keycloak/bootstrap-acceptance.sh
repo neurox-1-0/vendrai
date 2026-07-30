@@ -4,6 +4,18 @@ set -euo pipefail
 KCADM=/opt/keycloak/bin/kcadm.sh
 SERVER=http://keycloak:8080
 
+# Extract a Keycloak object id from `kcadm get ... --format csv --noquotes`
+# output. Deliberately not `sed -n '2p'` (which assumes a header row on line
+# 1): this kcadm version emits no header at all, so that always read line 2 as
+# empty and made every idempotency check below report "does not exist" even
+# when it did - the script would then try to recreate every user on every
+# re-run and fail once the first one already existed. Matching the UUID shape
+# is correct whether or not a given kcadm version prints a header, since the
+# header text ("id") never matches it.
+extract_id() {
+  grep -oE '[0-9a-fA-F]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -n 1
+}
+
 for attempt in $(seq 1 60); do
   if "$KCADM" config credentials \
     --server "$SERVER" \
@@ -24,7 +36,7 @@ create_user() {
   email="$2"
   role="$3"
   existing_id=$("$KCADM" get users -r neurox -q "username=$username" \
-    --fields id --format csv --noquotes | sed -n '2p')
+    --fields id --format csv --noquotes | extract_id)
   if [ -z "$existing_id" ]; then
     "$KCADM" create users -r neurox \
       -s "username=$username" \
@@ -49,7 +61,7 @@ create_user auditor auditor@synthetic.neurox.local auditor
 create_user admin admin@synthetic.neurox.local admin
 
 client_id=$("$KCADM" get clients -r neurox -q clientId=neurox-e2e \
-  --fields id --format csv --noquotes | sed -n '2p')
+  --fields id --format csv --noquotes | extract_id)
 if [ -z "$client_id" ]; then
   client_id=$("$KCADM" create clients -r neurox \
     -s clientId=neurox-e2e \
@@ -71,7 +83,7 @@ create_mapper() {
   shift 2
   existing=$("$KCADM" get "clients/$client_id/protocol-mappers/models" \
     -r neurox -q "name=$mapper_name" --fields id --format csv --noquotes \
-    | sed -n '2p')
+    | extract_id)
   if [ -z "$existing" ]; then
     "$KCADM" create "clients/$client_id/protocol-mappers/models" -r neurox \
       -s "name=$mapper_name" \
