@@ -24,6 +24,21 @@ def _supplier_plan(*capabilities: str) -> InvestigationPlan:
     )
 
 
+# Every supplier capability that is mandatory once documents are ready and a
+# legal name is available. Kept as a constant so a new mandatory capability
+# fails one obvious assertion rather than every test in this file.
+MANDATORY_SUPPLIER_CAPABILITIES = (
+    "document_intelligence",
+    "duplicate_detection",
+    "sanctions_screening",
+    "policy_retrieval",
+    "document_completeness",
+    "supplier_controls",
+    "injection_scan",
+    "risk_screening",
+)
+
+
 def test_plan_validation_builds_parallel_supplier_group():
     groups, eligible = validate_plan(
         "supplier",
@@ -33,17 +48,24 @@ def test_plan_validation_builds_parallel_supplier_group():
             "bank_account_available": False,
             "registered_country_available": False,
         },
-        _supplier_plan(
-            "document_intelligence",
-            "duplicate_detection",
-            "sanctions_screening",
-            "policy_retrieval",
-        ),
+        _supplier_plan(*MANDATORY_SUPPLIER_CAPABILITIES),
     )
-    assert groups == [
-        ["document_intelligence", "policy_retrieval"],
-        ["duplicate_detection", "sanctions_screening"],
+    # Capabilities with no unmet dependency run together; the rest wait for
+    # document_intelligence.
+    assert groups[0] == [
+        "document_intelligence",
+        "policy_retrieval",
+        "injection_scan",
     ]
+    assert set(groups[1]) == {
+        "duplicate_detection",
+        "sanctions_screening",
+        "document_completeness",
+        "supplier_controls",
+        "risk_screening",
+    }
+    # bank_consistency needs bank and country evidence, neither of which this
+    # case has, so it must not be offered to the planner at all.
     assert "bank_consistency" not in eligible
 
 
@@ -73,12 +95,7 @@ async def test_planner_calls_real_gateway_contract_and_returns_metadata(
             isinstance(value, bool)
             for value in payload["observable_facts"].values()
         )
-        output = _supplier_plan(
-            "document_intelligence",
-            "duplicate_detection",
-            "sanctions_screening",
-            "policy_retrieval",
-        )
+        output = _supplier_plan(*MANDATORY_SUPPLIER_CAPABILITIES)
         assert model is InvestigationPlan
         return LLMCallResult(
             output=output,
@@ -100,7 +117,6 @@ async def test_planner_calls_real_gateway_contract_and_returns_metadata(
     )
     assert plan.latency_ms == 37
     assert plan.model_version == "gemini-test-1"
-    assert plan.execution_groups[1] == [
-        "duplicate_detection",
-        "sanctions_screening",
-    ]
+    assert {"duplicate_detection", "sanctions_screening"}.issubset(
+        plan.execution_groups[1]
+    )
