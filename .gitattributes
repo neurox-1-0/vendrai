@@ -1,0 +1,40 @@
+# Normalize line endings so a Windows checkout cannot corrupt files that are
+# executed inside Linux containers.
+#
+# Without this, git core.autocrlf=true rewrites committed LF scripts to CRLF on
+# checkout. The container then fails on the first line with
+# "set: pipefail: invalid option name", which is a confusing way to discover a
+# line-ending problem. See plans/90-defect-register.md D-007.
+
+* text=auto eol=lf
+
+# Executed inside Linux containers - must stay LF.
+*.sh            text eol=lf
+*.bash          text eol=lf
+*.rego          text eol=lf
+*.sql           text eol=lf
+Dockerfile      text eol=lf
+Dockerfile.*    text eol=lf
+*.yml           text eol=lf
+*.yaml          text eol=lf
+.env.example    text eol=lf
+
+# Windows-native tooling - must stay CRLF.
+*.ps1           text eol=crlf
+*.bat           text eol=crlf
+*.cmd           text eol=crlf
+
+# Binary assets - never touch.
+*.pdf           binary
+*.png           binary
+*.jpg           binary
+*.jpeg          binary
+*.gif           binary
+*.ico           binary
+*.zip           binary
+*.gz            binary
+*.exe           binary
+*.dll           binary
+*.woff          binary
+*.woff2         binary
+*.skops         binary

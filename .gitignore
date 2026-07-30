@@ -30,6 +30,8 @@ Database Schema/
 !docs/
 !docs/backup-restore-runbook.md
 !docs/competition/
+!plans/
+!plans/*.md
 !docs/competition/*.md
 
 # Node/Python specific ignores
@@ -42,3 +44,9 @@ env/
 
 # Native (non-Docker) local run artifacts
 native/
+
+# Crash dumps and local runtime debris (see plans/90-defect-register.md D-009)
+*.dump
+erl_crash.dump
+*.log
+!infra/**/*.log
