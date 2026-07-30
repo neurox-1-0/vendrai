@@ -58,8 +58,39 @@ leave the platform.
 
 `product-up` is the complete functional product: both workflows, Keycloak
 bootstrap, PostgreSQL, RabbitMQ, Redis, MinIO, ClamAV, Docling, Tesseract,
-EasyOCR, Qdrant retrieval, OPA, Mailpit and the ERP sandbox. It does not omit
-OCR or replace services with hardcoded data.
+EasyOCR, Qdrant retrieval, OPA, Mailpit, the ERP sandbox, and the risk
+sandbox. It does not omit OCR or replace services with hardcoded data.
+
+It runs `./scripts/stack.sh preflight` first, which checks the Docker daemon,
+Compose version, disk headroom, memory, published ports, `.env` completeness,
+and Postgres volume/password consistency — and names the container or process
+holding a conflicting port rather than letting Compose fail on it minutes into
+a build.
+
+```bash
+./scripts/stack.sh bootstrap
+```
+
+**A healthy stack is not a usable one.** Every container can be green while
+every business scenario fails, because the vendor master, invoice history,
+policies, and sanctions data are not loaded. `bootstrap` loads them — through
+the product's own API, so the run also exercises authorization, idempotency,
+audit, and indexing — and prints a readiness report. It is idempotent; running
+it twice changes nothing.
+
+If `SANCTIONS_EU_URL` is not configured, bootstrap completes and tells you
+plainly that supplier scenarios will block at screening, which is the designed
+fail-closed behaviour. Pass `--allow-missing-eu-sanctions` to proceed anyway
+for invoice-only testing.
+
+```bash
+./scripts/stack.sh doctor
+```
+
+`doctor` reports three tiers, because they are genuinely different questions:
+liveness (processes running, one-shot jobs exited 0), readiness (dependencies
+answering correctly), and business-readiness (the data a scenario actually
+needs). Tier 3 fails until `bootstrap` has run, and that is the point.
 
 Open:
 
@@ -287,6 +318,54 @@ Before running it, set `AUTH_MODE=keycloak`, keep all test data synthetic, set
 `ALLOW_EXTERNAL_LLM=true`, configure the server-side `GEMINI_API_KEY`, and
 replace every `CHANGE_ME` secret. Never put credentials in source control or
 chat.
+
+### Browser and failure acceptance
+
+Playwright runs against the **real running stack**, never a mocked backend —
+a mocked suite would repeat exactly the mistake it exists to catch.
+
+```bash
+./scripts/stack.sh product-up
+./scripts/stack.sh bootstrap
+./scripts/stack.sh doctor          # fail fast if the stack is not healthy
+
+cd apps/web
+npm ci && npm run e2e:install
+npm run e2e                        # golden supplier and invoice journeys
+npm run e2e:failures               # deliberate failure injection
+```
+
+The journeys assert on evidence values — the citation, the variance figure, the
+audit entry — not on pages rendering. Failure injection stops and starts real
+containers, so it runs separately from the journeys and restarts whatever it
+stopped.
+
+### Restore drill
+
+The runbook has an executable form, which reports the RPO and RTO it measured
+rather than the ones the document hopes for:
+
+```bash
+./scripts/stack.sh operations-up
+./scripts/restore-drill.sh
+```
+
+It restores into a throwaway volume and container; the live `postgres_data`
+volume is never touched.
+
+### Evaluation
+
+```bash
+docker compose exec api python -m scripts.evaluation materialize
+docker compose exec api python -m scripts.evaluation run       # resumable
+docker compose exec api python -m scripts.evaluation score
+```
+
+All 100 cases need a real LLM, so a full run is 100 live workflows and will hit
+quota. The runner checkpoints after every case and treats quota exhaustion as a
+pause rather than a failure; resume with `run --resume`. The report publishes
+the measured numbers, and prints *not measured* where nothing exercised a
+metric rather than rounding it to zero.
 
 ## Release truth
 

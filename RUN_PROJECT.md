@@ -296,7 +296,36 @@ Press `Ctrl+C` to stop following logs; this does not stop the containers.
 
 ## 8. Verify health and open the application
 
-From a Bash terminal:
+Run the three-tier health report first. It answers three genuinely different
+questions, and only the third one tells you whether a business scenario can
+succeed:
+
+```bash
+./scripts/stack.sh doctor
+```
+
+- **Tier 1, liveness** — every container running, every one-shot job exited 0.
+- **Tier 2, readiness** — dependencies answering correctly, probed from inside
+  the API container so the check follows the same network path the application
+  does.
+- **Tier 3, business-readiness** — the vendor master, invoice history,
+  policies, and sanctions data a scenario actually needs.
+
+**Tier 3 fails until you run `./scripts/stack.sh bootstrap`.** That is expected
+and correct: a stack can be entirely green and still fail every scenario,
+because nothing loads the reference data. Making that visible is the whole
+reason the third tier exists.
+
+```bash
+./scripts/stack.sh bootstrap
+```
+
+The bootstrap is idempotent, loads reference data and policies through the
+product's own API, waits for retrieval indexing before reporting success, and
+prints a secret-free readiness report. If the EU sanctions source is not
+configured it says so in one actionable sentence rather than failing obscurely.
+
+The raw endpoints remain available if you want them directly:
 
 ```bash
 curl --fail --silent --show-error http://localhost:8000/health/live
@@ -532,10 +561,11 @@ Both a client and server section must appear.
 
 ### A port is already in use
 
-Check the port owner before stopping anything:
+Run the preflight check, which names the container or process holding each
+conflicting port rather than leaving you to find it:
 
 ```bash
-docker compose ps
+./scripts/stack.sh preflight
 ```
 
 NeuroX binds localhost ports `3000`, `8000`, `8080`, `8025`, `9000`, and
@@ -565,14 +595,20 @@ error and the output of `docker system df`.
 
 ### Windows files have `^M` or scripts fail
 
-Clone inside WSL and verify Git's line-ending setting:
+This should no longer happen. The root `.gitattributes` forces `eol=lf` on
+every file executed inside a Linux container, which overrides
+`core.autocrlf=true`, and the repository has been renormalized.
+
+If you are on a checkout predating that change, refresh it:
 
 ```bash
-git config --get core.autocrlf
-file scripts/stack.sh
+git rm --cached -r . && git reset --hard
+file scripts/stack.sh          # must not say "with CRLF line terminators"
 ```
 
-Do not edit shell scripts with forced Windows CRLF endings.
+Do not edit shell scripts with forced Windows CRLF endings, and do not "fix"
+this by hand-converting files — a recurring, documented, manually repaired
+defect is an unfixed defect, which is why `.gitattributes` exists.
 
 ## 13. Test-result template
 
