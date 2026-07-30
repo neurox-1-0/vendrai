@@ -18,7 +18,7 @@ export interface AssistanceTargetDefinition {
   order?: number;
 }
 
-interface RegisteredAssistanceTarget
+export interface RegisteredAssistanceTarget
   extends AssistanceTargetDefinition {
   element: HTMLElement;
 }
