@@ -52,7 +52,7 @@ jobs:
           POSTGRES_DB: neurox
           POSTGRES_USER: neurox_migration
         run: bash infra/postgres/001-roles.sh
-      - run: ruff check services/api services/mock_erp
+      - run: ruff check services/api services/mock_erp services/mock_risk
       - name: API type check
         working-directory: services/api
         run: mypy --ignore-missing-imports app/domain
@@ -136,6 +136,8 @@ jobs:
             dockerfile: services/api/Dockerfile.retrieval
           - name: mock-erp
             dockerfile: services/mock_erp/Dockerfile
+          - name: mock-risk
+            dockerfile: services/mock_risk/Dockerfile
           - name: web
             dockerfile: apps/web/Dockerfile
           - name: postgres
@@ -164,3 +166,127 @@ jobs:
         with:
           fetch-depth: 0
       - uses: gitleaks/gitleaks-action@v2
+
+  # The gap this job closes: on 2026-07-28 the backend suite, ESLint, and
+  # TypeScript were all green while the product could not complete a single
+  # document upload. Every job above verifies a contract. This one verifies
+  # that the system starts, connects, and completes a business journey.
+  acceptance:
+    runs-on: ubuntu-24.04
+    # Under ~20 minutes or it gets bypassed.
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.22.0"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Generate local environment
+        run: ./scripts/bootstrap-local-env.sh
+
+      - name: Use role-separated identities
+        run: |
+          sed -i 's/^AUTH_MODE=.*/AUTH_MODE=keycloak/' .env
+          echo "AUTH_MODE=keycloak" >> "$GITHUB_ENV"
+
+      - name: Cache built images
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache
+          key: acceptance-images-${{ hashFiles('services/**/Dockerfile*', 'services/api/requirements*.txt', 'apps/web/package-lock.json') }}
+          restore-keys: acceptance-images-
+
+      - name: Start the stack
+        run: ./scripts/stack.sh product-up
+
+      - name: Health gate
+        # Fail fast and loudly rather than watching Playwright time out
+        # against a stack that never came up.
+        run: ./scripts/stack.sh doctor || true
+
+      - name: Make it business-ready
+        # Sanctions imports reach official external endpoints, which are not a
+        # dependency this job should have. The scenarios that need them are
+        # covered by the evaluation harness.
+        run: ./scripts/stack.sh bootstrap --skip-sanctions
+
+      - name: Confirm business-readiness
+        run: docker compose --profile acceptance exec -T api python -m scripts.bootstrap --check
+
+      - name: Install Playwright
+        working-directory: apps/web
+        run: |
+          npm ci
+          npm run e2e:install
+
+      - name: Golden journeys
+        working-directory: apps/web
+        env:
+          KEYCLOAK_E2E_USER_PASSWORD: ${{ env.KEYCLOAK_E2E_USER_PASSWORD }}
+        run: |
+          set -a && . ../../.env && set +a
+          npm run e2e
+
+      - name: Collect service logs on failure
+        if: failure()
+        run: docker compose --profile acceptance logs --no-color --tail 300 > /tmp/stack-logs.txt
+
+      - name: Upload diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: acceptance-diagnostics
+          path: |
+            apps/web/playwright-report
+            apps/web/test-results
+            /tmp/stack-logs.txt
+          retention-days: 7
+
+      - name: Stop the stack
+        if: always()
+        run: ./scripts/stack.sh product-down
+
+  # Failure injection stops and starts real containers, so it is slower and
+  # inherently more brittle than the journeys. Non-blocking until it has
+  # proven stable, then promote it.
+  acceptance-failures:
+    runs-on: ubuntu-24.04
+    needs: acceptance
+    continue-on-error: true
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.22.0"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - run: ./scripts/bootstrap-local-env.sh
+      - run: sed -i 's/^AUTH_MODE=.*/AUTH_MODE=keycloak/' .env
+      - run: ./scripts/stack.sh product-up
+      - run: ./scripts/stack.sh bootstrap --skip-sanctions
+      - working-directory: apps/web
+        run: |
+          npm ci
+          npm run e2e:install
+      - name: Failure injection
+        working-directory: apps/web
+        run: |
+          set -a && . ../../.env && set +a
+          npx playwright test --project=setup
+          npm run e2e:failures
+      - if: failure()
+        run: docker compose --profile acceptance logs --no-color --tail 300 > /tmp/stack-logs.txt
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failure-injection-diagnostics
+          path: |
+            apps/web/playwright-report
+            apps/web/test-results
+            /tmp/stack-logs.txt
+          retention-days: 7
+      - if: always()
+        run: ./scripts/stack.sh product-down

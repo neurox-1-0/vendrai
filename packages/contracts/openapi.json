@@ -135,6 +135,15 @@
             "format": "uuid",
             "title": "Step Id",
             "type": "string"
+          },
+          "timing_source": {
+            "default": "MEASURED",
+            "enum": [
+              "MEASURED",
+              "PROJECTED"
+            ],
+            "title": "Timing Source",
+            "type": "string"
           }
         },
         "required": [
@@ -2855,6 +2864,7 @@
         "type": "object"
       },
       "RunTimingSummary": {
+        "description": "Aggregates computed only from committed steps.\n\nIn-flight steps are excluded rather than estimated. Including them would\nmake every figure here a moving projection wearing the label of a\nmeasurement, and the numbers would silently shrink as steps completed.\n``projected_step_count`` tells the client how much is still outstanding so\nit can say so honestly.",
         "properties": {
           "active_compute_ms": {
             "title": "Active Compute Ms",
@@ -2877,6 +2887,11 @@
           },
           "parallel_time_saved_ms": {
             "title": "Parallel Time Saved Ms",
+            "type": "integer"
+          },
+          "projected_step_count": {
+            "default": 0,
+            "title": "Projected Step Count",
             "type": "integer"
           },
           "total_elapsed_ms": {
@@ -5940,6 +5955,113 @@
         ]
       }
     },
+    "/api/v1/cases/{case_id}/audit:verify": {
+      "get": {
+        "description": "Recompute the tenant's audit hash chain and report any break.\n\nWriting a hash chain is not an integrity control; detecting a break in it\nis. This is that detection path, and it deliberately verifies the whole\ntenant chain rather than only this case's entries - a tamperer who deletes\na row breaks the link for every record after it, and a per-case view would\nmiss exactly that.",
+        "operationId": "verify_audit_chain_api_v1_cases__case_id__audit_verify_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "case_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Case Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-dev-tenant-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Dev-Tenant-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-dev-user-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Dev-User-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-dev-roles",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Dev-Roles"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Verify Audit Chain",
+        "tags": [
+          "evidence",
+          "audit"
+        ]
+      }
+    },
     "/api/v1/cases/{case_id}/documents": {
       "get": {
         "operationId": "list_case_documents_api_v1_cases__case_id__documents_get",
@@ -8928,6 +9050,122 @@
       }
     },
     "/api/v1/knowledge/documents": {
+      "get": {
+        "description": "List the tenant's policies and the state of their latest version.\n\nRead access is broad on purpose: every staff role reviews cases against\ncited policy, and a reviewer who cannot see which version is in force\ncannot judge the citation.",
+        "operationId": "list_policies_api_v1_knowledge_documents_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "policy_code",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Policy Code"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-dev-tenant-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Dev-Tenant-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-dev-user-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Dev-User-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-dev-roles",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Dev-Roles"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PolicyResponse"
+                  },
+                  "title": "Response List Policies Api V1 Knowledge Documents Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Policies",
+        "tags": [
+          "knowledge"
+        ]
+      },
       "post": {
         "operationId": "create_policy_api_v1_knowledge_documents_post",
         "parameters": [
