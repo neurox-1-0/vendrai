@@ -36,12 +36,13 @@
   --color-ink: #0F172A;
   --color-muted: #64748B;
 
-  /* Dual-font system: Calistoga carries personality in display headings,
-   * Inter carries clarity in every UI surface, JetBrains Mono marks
-   * technical strings (case numbers, section labels, hashes). */
-  --font-display: var(--font-calistoga), Georgia, "Times New Roman", serif;
-  --font-body: var(--font-inter), ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --font-mono: var(--font-jetbrains-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  /* One variable family in two optical roles: --font-display is the headline
+   * cut, --font-body the reading cut. They resolve to the same file, so the
+   * distinction costs nothing extra to download (see .font-display below).
+   * Google Sans Code marks technical strings (case numbers, hashes, JSON). */
+  --font-display: var(--font-google-sans-flex), ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-body: var(--font-google-sans-flex), ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: var(--font-google-sans-code), ui-monospace, SFMono-Regular, Menlo, monospace;
 
   /* Neutral shadows are slate-tinted so they read as shade rather than soot.
    * The accent pair gives lifted blue elements a coloured ambient glow. */
@@ -62,11 +63,19 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Calistoga ships in a single weight; letting the browser synthesise a faux
- * bold smears its serifs, so display type leans on size for hierarchy. */
+/* The "Headline" cut of Google Sans Flex: same file, driven up the optical
+ * size axis. At display opsz the letterforms tighten and apertures close
+ * slightly, which is what stops large text from looking like blown-up body
+ * copy. Only `opsz` is pinned, so `wght` stays under font-weight control and
+ * utilities like font-bold keep working across the variable 1-1000 range. */
 .font-display {
-  font-weight: 400;
-  letter-spacing: -0.01em;
+  font-variation-settings: "opsz" 96;
+  letter-spacing: -0.02em;
+}
+
+/* Body text sits at the reading end of the same axis. */
+body {
+  font-variation-settings: "opsz" 18;
 }
 
 :focus-visible {
